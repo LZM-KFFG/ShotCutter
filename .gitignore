@@ -1,0 +1,21 @@
+# 虚拟环境 / 运行产物
+.venv/
+__pycache__/
+*.py[cod]
+
+# 工作目录（素材、切片、成片、剪辑工程、打包 zip）
+_work/
+
+# 本机运行配置（含本地路径 / 模型路径，按需自行备份）
+pipeline.json
+pipeline.json.bak*
+
+# 调试残留
+web/_tmp*
+web/_p4.html
+*.log
+
+# 系统
+Thumbs.db
+desktop.ini
+.DS_Store

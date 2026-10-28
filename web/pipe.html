@@ -1,0 +1,1920 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>成片流水线 · 打标 → 脚本 → 配音 → 对齐 → 合成</title>
+<style>
+:root{
+  --bg:#f5f5f2; --panel:#fff; --line:#e4e3de; --line-2:#d6d5cf;
+  --ink:#1d1d1b; --muted:#767570; --dim:#9b9a94;
+  --accent:#2f6feb; --accent-2:#eaf1fe; --ok:#1a7f4b; --warn:#a86400; --bad:#c0392b;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif}
+a{color:inherit}
+header{position:sticky;top:0;z-index:30;background:rgba(245,245,242,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.hw{max-width:1320px;margin:0 auto;padding:10px 20px;display:flex;align-items:center;gap:16px}
+.brand h1{font-size:15px;margin:0;font-weight:650;letter-spacing:.2px}
+.brand p{margin:1px 0 0;font-size:11.5px;color:var(--muted)}
+.sp{flex:1}
+.nav{display:flex;gap:6px}
+.nav a,.nav button{font:inherit;font-size:12.5px;padding:6px 12px;border-radius:8px;border:1px solid var(--line);background:#fff;color:var(--muted);text-decoration:none;cursor:pointer}
+.nav a:hover,.nav button:hover{color:var(--ink);border-color:var(--line-2)}
+.nav .on{background:var(--ink);color:#fff;border-color:var(--ink)}
+main{max-width:1320px;margin:0 auto;padding:20px}
+.steps{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap}
+.step{flex:1;min-width:150px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px;cursor:pointer;transition:.16s;position:relative}
+.step:hover{border-color:var(--line-2)}
+.step .n{font:11px var(--mono);color:var(--dim)}
+.step .t{font-weight:600;font-size:13.5px;margin-top:1px}
+.step .s{font-size:11.5px;color:var(--muted);margin-top:2px}
+.step.on{border-color:var(--accent);background:var(--accent-2);box-shadow:0 0 0 3px rgba(47,111,235,.07)}
+.step.done .n{color:var(--ok)}
+.step.done .n::after{content:" ✓"}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.card h2{font-size:13px;margin:0 0 12px;font-weight:650;letter-spacing:.3px;text-transform:none}
+.card h2 .hint{font-weight:400;color:var(--muted);font-size:11.5px;margin-left:8px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.agroup{margin:2px 0 6px}
+.agroup .gname{font-size:11px;color:var(--dim);margin-bottom:4px;letter-spacing:.4px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+label.f{display:block;font-size:11.5px;color:var(--muted);margin-bottom:4px}
+input[type=text],input[type=number],input[type=password],textarea,select{
+  width:100%;font:inherit;font-size:13px;padding:7px 10px;border:1px solid var(--line-2);border-radius:8px;background:#fff;color:var(--ink);outline:none}
+input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(47,111,235,.1)}
+textarea{resize:vertical;line-height:1.6}
+button.b{font:inherit;font-size:13px;padding:8px 14px;border-radius:8px;border:1px solid var(--ink);background:var(--ink);color:#fff;cursor:pointer;transition:.15s}
+button.b:hover{opacity:.86}
+button.b:disabled{opacity:.4;cursor:not-allowed}
+button.g{font:inherit;font-size:13px;padding:8px 14px;border-radius:8px;border:1px solid var(--line-2);background:#fff;color:var(--ink);cursor:pointer}
+button.g:hover{background:#fafaf8}
+button.g:disabled{opacity:.45;cursor:not-allowed}
+button.g.on{background:var(--accent-2);border-color:#a9c6f7;color:#1f57c4;font-weight:600}
+button.g.on:hover{background:#e2ecfd}
+button.sm{font-size:12px;padding:5px 10px}
+.chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:2px 8px;border-radius:999px;background:#f1f0ec;color:var(--muted);border:1px solid var(--line)}
+.chip.on{background:var(--accent-2);color:var(--accent);border-color:#cfe0fd}
+.hintline{font-size:11.5px;color:var(--muted);line-height:1.6}
+.tag{display:inline-block;font-size:10.5px;padding:1px 6px;border-radius:5px;background:#f1f0ec;color:#6b6a65;margin:2px 3px 0 0}
+.tag.sem{background:#eaf7ef;color:#1a7f4b}
+.bar{height:4px;background:#eceae5;border-radius:2px;overflow:hidden;margin-top:8px}
+.bar i{display:block;height:100%;background:var(--accent);width:0;transition:.25s}
+.pool{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px}
+.pi{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#fff;position:relative}
+.pi img{width:100%;aspect-ratio:16/10;object-fit:cover;display:block;background:#eae9e4}
+.pi .m{padding:5px 7px 6px}
+.pi .nm{font-size:11px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pi .du{font:10px var(--mono);color:var(--dim)}
+.pi .x{position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;background:rgba(0,0,0,.5);color:#fff;border:0;font-size:11px;line-height:18px;cursor:pointer;opacity:0;transition:.15s}
+.pi:hover .x{opacity:1}
+.script{border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:10px;background:#fff}
+.script.on{border-color:var(--accent);box-shadow:0 0 0 3px rgba(47,111,235,.07)}
+.script .hd{display:flex;align-items:center;gap:8px;cursor:pointer}
+.script .ttl{font-weight:600;font-size:13.5px}
+.sent{display:grid;grid-template-columns:1fr 150px;gap:8px;margin-top:7px;align-items:start}
+.sent textarea{font-size:12.5px;min-height:34px;padding:5px 8px}
+.sent input{font-size:11.5px;padding:5px 8px;color:var(--muted)}
+.shots{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
+.shots th{text-align:left;font-weight:500;color:var(--muted);font-size:11px;padding:6px 8px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff;z-index:2}
+.shots td{padding:6px 8px;border-bottom:1px solid #f2f1ed;vertical-align:middle;overflow:hidden;text-overflow:ellipsis}
+.shots tr:hover td{background:#fcfcfa}
+.shots img{width:76px;height:44px;object-fit:cover;border-radius:5px;background:#eae9e4;display:block}
+.shots button{white-space:nowrap}
+.tc{font:11px var(--mono);color:var(--muted);white-space:nowrap}
+/* ---------- 成片列表 ---------- */
+.ol td{padding:7px 8px}
+.ol .nm{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer}
+.ol .nm:hover{color:var(--accent);text-decoration:underline}
+.ol .ang{display:inline-block;padding:1px 6px;border-radius:20px;background:#f2f1ed;
+  color:#5d5a52;font-size:11px;white-space:nowrap}
+.ol .ver{font:11px var(--mono);color:var(--muted)}
+.ol tr.cur td{background:#f4f8ff}
+.ol tr.cur .nm{font-weight:600}
+.ol tr.sel td{background:#eef5ff}
+.ol tr.cur.sel td{background:#e3edff}
+.ol .act{display:flex;gap:4px;justify-content:flex-end}
+.ol .act button{font-size:11px;padding:2px 7px;border-radius:6px;border:1px solid var(--line);
+  background:#fff;color:#4a4740;cursor:pointer;white-space:nowrap}
+.ol .act button:hover{border-color:#c9c6be;background:#faf9f6}
+.ol .act button.dl{color:var(--accent);border-color:#cfe0ff}
+.ol .act button.del:hover{color:var(--bad);border-color:#f0c8c8}
+.ol th.ck, .ol td.ck{text-align:center;padding-left:4px;padding-right:0}
+.ol th.srt{cursor:pointer;user-select:none;white-space:nowrap}
+.ol th.srt:hover{color:var(--ink)}
+.ol th.srt .arr{display:inline-block;width:9px;margin-left:2px;font-size:9px;opacity:.28;transform:translateY(-1px)}
+.ol th.srt.on{color:var(--accent)}
+.ol th.srt.on .arr{opacity:1}
+.ol .kb{font:11px var(--mono);color:var(--muted);white-space:nowrap}
+.ol .kb.hi{color:var(--ink)}
+.kpi{display:flex;gap:22px;flex-wrap:wrap;margin-bottom:4px}
+.kpi div{font-size:12px;color:var(--muted)}
+.kpi b{display:block;font-size:19px;color:var(--ink);font-weight:650;letter-spacing:-.3px}
+.empty{text-align:center;padding:36px 20px;color:var(--dim);font-size:13px}
+#toast{position:fixed;left:50%;bottom:36px;transform:translate(-50%,18px);background:#1d1d1b;color:#fff;padding:10px 18px;border-radius:9px;font-size:13px;opacity:0;pointer-events:none;transition:.22s;z-index:99;max-width:80vw}
+#toast.on{opacity:1;transform:translate(-50%,0)}
+.modal{position:fixed;inset:0;background:rgba(20,20,18,.45);display:none;z-index:60;align-items:center;justify-content:center;padding:20px}
+.modal.on{display:flex}
+.sheet{background:#fff;border-radius:14px;max-width:640px;width:100%;max-height:88vh;overflow:auto;padding:20px 22px}
+.sheet h3{margin:0 0 4px;font-size:15px}
+.sheet .sec{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.sheet .sec:first-of-type{border:0;padding-top:0}
+.voicegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:7px}
+.voicegrid button{text-align:left;font-size:12px}
+.note{font-size:11.5px;color:var(--warn);background:#fdf6e7;border:1px solid #f0e2c4;border-radius:8px;padding:7px 10px;margin-top:8px;line-height:1.6}
+.note.bad{color:var(--bad);background:#fdf0ee;border-color:#f3d6d2}
+.note.ok{color:var(--ok);background:#eff9f2;border-color:#cfe9d8}
+.bmrow{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;cursor:pointer;background:#fff}
+.bmrow:hover{border-color:var(--line-2)}
+.bmrow.on{border-color:#cfe0fd;background:var(--accent-2)}
+.bmrow .ttl{font-size:12.5px}
+.bmres{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;font-size:12.5px}
+.bmres .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+video.prev{width:100%;max-width:340px;border-radius:10px;background:#000;display:block}
+.pi.sel{border-color:var(--accent);box-shadow:0 0 0 2px rgba(47,111,235,.16)}
+.pi.sel img{opacity:.8}
+.pi .cb{position:absolute;top:4px;left:4px;width:16px;height:16px;accent-color:var(--accent);cursor:pointer;z-index:3;margin:0}
+#folder{width:100%;font:12px var(--mono);min-height:64px;resize:vertical;line-height:1.5}
+.seltools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px;padding:6px 10px;
+  background:#fafaf7;border:1px solid var(--line);border-radius:9px}
+.seltools[hidden]{display:none}
+.seltools .cnt{font-size:12.5px;font-weight:600;margin-right:4px}
+.seltools .sp2{flex:1}
+
+/* 素材页顶部：统计条 + 操作组 */
+.phead{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+.stats{display:flex;align-items:flex-start;flex:1;min-width:0;flex-wrap:wrap;gap:0}
+.stat{padding:0 15px;border-left:1px solid var(--line)}
+.stat:first-child{padding-left:0;border-left:0}
+.stat b{display:block;font-size:17px;line-height:1.2;font-weight:650;letter-spacing:-.3px;color:var(--ink);font-variant-numeric:tabular-nums}
+.stat span{display:block;font-size:11px;color:var(--muted);white-space:nowrap;margin-top:1px}
+.stat.dim b{color:var(--dim)}
+.stat .mini{display:block;width:54px;height:2px;border-radius:2px;background:var(--line);margin-top:5px;overflow:hidden}
+.stat .mini u{display:block;height:100%;width:0;background:var(--ok);border-radius:2px;transition:width .3s}
+.pacts{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.pacts .sep{width:1px;height:18px;background:var(--line);margin:0 1px}
+#btn-selmode.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+#btn-clearpool:hover{color:var(--bad);border-color:#f0c8c8}
+.bdg{display:inline-block;margin-left:5px;padding:0 5px;border-radius:20px;background:rgba(255,255,255,.24);
+  font-size:10.5px;font-weight:600;line-height:15px;vertical-align:1px}
+
+/* 成片列表：勾选后的底部浮动条 */
+.olfab{position:fixed;right:24px;bottom:24px;transform:translateY(12px);z-index:56;
+  display:flex;align-items:center;gap:8px;padding:8px 10px 8px 16px;background:#fff;
+  border:1px solid var(--line-2);border-radius:13px;box-shadow:0 10px 30px rgba(20,20,18,.16);
+  opacity:0;pointer-events:none;transition:.16s;max-width:calc(100vw - 32px)}
+.olfab.on{opacity:1;transform:translateY(0);pointer-events:auto}
+.olfab b{font-size:13px;white-space:nowrap}
+.olfab .sz{font-size:11.5px;color:var(--muted);white-space:nowrap}
+.olfab .sp{width:8px}
+.olfab button{white-space:nowrap}
+#olfab-del:hover{color:var(--bad);border-color:#f0c8c8}
+body.has-fab main{padding-bottom:76px}
+.navrow{display:flex;justify-content:space-between;gap:10px;margin:18px 0 30px}
+.navrow button{min-width:132px}
+.navrow button:disabled{opacity:.4;cursor:not-allowed}
+.navrow .hintline{flex:1;text-align:center;align-self:center}
+@media (max-width:900px){.grid2,.grid3{grid-template-columns:1fr}.sent{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <div class="hw">
+    <div class="brand">
+      <h1>成片流水线</h1>
+      <p>打标 → 脚本 → 配音 → 对齐 → 合成 · 全部在本机运行</p>
+    </div>
+    <div class="sp"></div>
+    <div class="nav">
+      <span class="chip" id="chip-llm" title="大模型状态">模型…</span>
+      <a href="/">← 镜头切割器</a>
+      <button id="btn-cfg">设置</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="steps" id="steps"></div>
+
+  <!-- ① 素材 -->
+  <section id="v1">
+    <div class="card">
+      <h2>加入素材 <span class="hint">一个切片 = 一个镜头</span></h2>
+      <div class="grid2">
+        <div>
+          <label class="f">素材文件夹（一行一个，可以填多个；递归扫描里面的视频，每个文件当一条镜头）</label>
+          <textarea id="folder" rows="3" placeholder="D:\素材\收纳盒\切片&#10;E:\工作\直播素材\百合干\素材\镜头切片"></textarea>
+          <div class="row" style="margin-top:6px">
+            <button class="g sm" id="btn-dir">选择文件夹</button>
+            <button class="b sm" id="btn-scan">扫描加入</button>
+            <span class="hintline" id="fol-cnt"></span>
+          </div>
+        </div>
+        <div>
+          <label class="f">或从已检测的视频导入镜头</label>
+          <div class="row">
+            <select id="vids" style="flex:1"><option value="">（先在切割器里检测视频）</option></select>
+            <button class="g sm" id="btn-addvid">导入</button>
+          </div>
+        </div>
+      </div>
+      <div class="bar" id="scan-bar" style="display:none"><i></i></div>
+      <div class="hintline" id="scan-msg" style="margin-top:8px"></div>
+    </div>
+
+    <div class="card">
+      <div class="phead">
+        <div class="stats">
+          <div class="stat"><b id="k-pool">0</b><span>素材</span></div>
+          <div class="stat"><b id="k-tag">0</b><span id="k-tag-sub">已打标</span>
+            <i class="mini"><u id="k-tag-fill"></u></i></div>
+          <div class="stat" id="st-sem"><b id="k-sem">0</b><span>语义标签</span></div>
+          <div class="stat"><b id="k-dur">0s</b><span>总时长</span></div>
+        </div>
+        <div class="pacts">
+          <button class="g sm" id="btn-selmode" title="打开后每个素材左上角出现勾选框，可批量移出">多选</button>
+          <span class="sep"></span>
+          <button class="b sm" id="btn-tag" title="给还没打标的素材打标">打标</button>
+          <button class="g sm" id="btn-tagall" title="所有素材重新打一遍（会覆盖原标签）">全部重打</button>
+          <button class="g sm" id="btn-clearpool" title="把素材池清空（不动原始视频文件）">清空</button>
+        </div>
+      </div>
+      <div class="seltools" id="seltools" hidden>
+        <span class="cnt" id="sel-cnt">已选 0 条</span>
+        <button class="g sm" id="btn-selall">全选</button>
+        <button class="g sm" id="btn-selinv">反选</button>
+        <button class="g sm" id="btn-seluntag">只选未打标</button>
+        <span class="sp2"></span>
+        <button class="b sm" id="btn-seldel" disabled>删除所选</button>
+        <button class="g sm" id="btn-seloff">退出多选</button>
+      </div>
+      <div class="bar" id="tag-bar" style="display:none"><i></i></div>
+      <div class="hintline" id="tag-msg" style="margin-bottom:10px">
+        打标先算亮度/色调/细节/运动；配了视觉模型才会加场景、主体这类语义标签，对齐更准。
+      </div>
+      <div class="pool" id="pool"></div>
+      <div class="empty" id="pool-empty">素材池是空的，先扫描一个文件夹。</div>
+    </div>
+  </section>
+
+  <!-- ② 脚本 -->
+  <section id="v2" hidden>
+    <div class="card">
+      <h2>商品信息 <span class="hint">写清卖点，脚本和分镜都靠它</span></h2>
+      <div class="grid2">
+        <div><label class="f">品名</label><input type="text" id="p-name" placeholder="抽屉收纳盒"></div>
+        <div><label class="f">目标人群</label><input type="text" id="p-aud" placeholder="厨房台面小的上班族"></div>
+      </div>
+      <div style="margin-top:10px"><label class="f">卖点（一行一个，最多 4 条，越具体越好：数字 &gt; 形容词）</label>
+        <textarea id="p-points" rows="3" placeholder="承重15公斤，压不塌&#10;抽屉式，不用弯腰&#10;食品级PP，可直接放餐具"></textarea></div>
+      <div class="grid3" style="margin-top:10px">
+        <div><label class="f">用户痛点</label><input type="text" id="p-pain" placeholder="台面永远乱"></div>
+        <div><label class="f">价格 / 优惠</label><input type="text" id="p-price" placeholder="69 / 第二件半价"></div>
+        <div><label class="f">信任背书</label><input type="text" id="p-proof" placeholder="月销2万件 / 质检报告"></div>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <div style="width:150px"><label class="f">目标时长</label>
+          <select id="p-target">
+            <option value="15">15 秒</option><option value="22">22 秒</option>
+            <option value="30" selected>30 秒</option><option value="45">45 秒</option><option value="60">60 秒</option>
+          </select></div>
+        <div style="flex:1;min-width:300px"><label class="f">风格（选几个就出几条脚本，鼠标停上去看适合什么）</label>
+          <div id="angles"></div>
+          <div class="row" id="angle-presets" style="margin-top:8px;gap:6px"></div></div>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <button class="b" id="btn-script">生成脚本</button>
+        <label class="hintline" style="display:flex;gap:6px;align-items:center">
+          <input type="checkbox" id="use-llm" checked> 用大模型写（没配 Key 时自动回落模板）
+        </label>
+      </div>
+      <div class="bar" id="script-bar" style="display:none"><i></i></div>
+      <div class="hintline" id="script-msg" style="margin-top:8px"></div>
+    </div>
+
+    <div class="card" id="scripts-card" hidden>
+      <h2>脚本 <span class="hint">点标题切换当前这条；句子可以直接改，改完自动保存</span></h2>
+      <div id="scripts"></div>
+    </div>
+  </section>
+
+  <!-- ③ 配音 -->
+  <section id="v3" hidden>
+    <div class="card">
+      <h2>配音 <span class="hint">edge-tts 在线音色，带逐句时间戳；断网时回落系统语音</span></h2>
+      <div class="grid2">
+        <div><label class="f">音色</label><select id="voice"></select></div>
+        <div><label class="f">语速 <span id="rate-v">+8%</span></label>
+          <input type="range" id="rate" min="-20" max="30" step="2" value="8" style="width:100%">
+        </div>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <button class="b" id="btn-tts">生成配音</button>
+        <span class="hintline" id="tts-msg"></span>
+      </div>
+      <div class="bar" id="tts-bar" style="display:none"><i></i></div>
+      <div id="tts-out" style="margin-top:14px"></div>
+    </div>
+  </section>
+
+  <!-- ④ 分镜 -->
+  <section id="v4" hidden>
+    <div class="card">
+      <div class="row">
+        <div style="flex:1">
+          <h2 style="margin:0">分镜对齐 <span class="hint">按句子时长找镜头，不是把素材拼满；可用「换一个」手动调</span></h2>
+        </div>
+        <button class="g" id="btn-align">自动对齐</button>
+        <button class="b" id="btn-batch" title="把选中的脚本一次走完配音、分镜、合成">批量出片</button>
+      </div>
+      <div class="kpi" style="margin-top:14px">
+        <div><b id="k-clips">0</b>镜头数</div>
+        <div><b id="k-mats">0</b>用到的素材</div>
+        <div><b id="k-total">0s</b>成片时长</div>
+        <div><b id="k-reuse">0</b>最多复用</div>
+      </div>
+      <div id="shots-wrap" style="margin-top:12px;max-height:60vh;overflow:auto"></div>
+    </div>
+  </section>
+
+  <!-- ⑤ 合成 -->
+  <section id="v5" hidden>
+    <div class="card">
+      <h2>背景音乐 <span class="hint">口播是主音轨，BGM 自动压低；曲子比视频短会自动循环</span></h2>
+      <div class="row">
+        <select id="bgm-sel" style="flex:1;min-width:240px"></select>
+        <button class="g sm" id="btn-bgm-add">加音乐文件夹</button>
+        <button class="g sm" id="btn-bgm-refresh">刷新</button>
+      </div>
+      <div class="hintline" id="bgm-msg" style="margin-top:8px"></div>
+      <div class="row" id="bgm-dirs" style="margin-top:6px;gap:6px"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="g sm" id="btn-bgm-play">试听</button>
+        <audio id="bgm-audio" controls preload="none" style="flex:1;min-width:220px;height:34px"></audio>
+      </div>
+      <div class="grid2" style="margin-top:10px">
+        <div><label class="f">BGM 音量 <b id="bgm-vol-v">0.10</b></label>
+          <input type="range" id="bgm-vol" min="0" max="0.6" step="0.01" style="width:100%"></div>
+        <div><label class="f">淡入淡出</label>
+          <select id="bgm-fade">
+            <option value="0">不淡</option><option value="0.5">0.5 秒</option>
+            <option value="0.8">0.8 秒</option><option value="1.5">1.5 秒</option><option value="2.5">2.5 秒</option>
+          </select></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>合成 <span class="hint">H.264 + 烧字幕；口播为主音轨，BGM 自动压低</span></h2>
+      <div class="row">
+        <button class="b" id="btn-compose">开始合成</button>
+        <button class="g" id="btn-batch2" title="全部脚本一次出完">批量出片</button>
+        <span class="hintline" id="cmp-msg"></span>
+      </div>
+      <div class="bar" id="cmp-bar" style="display:none"><i></i></div>
+    </div>
+    <div class="card" id="out-card" hidden>
+      <h2>成片播放 <span class="hint">在下面的列表里点任意一条切换</span></h2>
+      <div class="row" style="align-items:flex-start;gap:18px">
+        <video class="prev" id="out-video" controls playsinline></video>
+        <div style="flex:1;min-width:220px">
+          <div class="kpi"><div><b id="o-dur">-</b>时长</div><div><b id="o-size">-</b>体积</div><div><b id="o-kbps">-</b>码率</div><div><b id="o-clips">-</b>镜头</div></div>
+          <div class="hintline" id="o-name" style="margin:10px 0"></div>
+          <div class="row">
+            <button class="g sm" id="btn-outdir">打开成片文件夹</button>
+            <button class="g sm" id="btn-csv">打开分镜表</button>
+            <a class="g sm" id="btn-dl" download style="text-decoration:none;display:inline-block">下载</a>
+            <button class="g sm" id="btn-outdel" title="删掉这条成片以及它的分镜表、字幕、配音、项目记录（进回收站）">删除成片</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="outlist-card" hidden>
+      <h2>成片列表 <span class="hint" id="ol-sum"></span><span class="hint" style="margin-left:8px">点表头切换排序</span></h2>
+      <div class="row" id="ol-tools">
+        <button class="g sm" id="btn-ol-all">全选</button>
+        <button class="g sm" id="btn-ol-none">全不选</button>
+        <span class="hintline" id="ol-cnt">已选 0 / 0 条</span>
+        <button class="b sm" id="btn-ol-dl">批量下载</button>
+        <button class="g sm" id="btn-ol-del">删除所选</button>
+        <button class="g sm" id="btn-ol-dir">打开文件夹</button>
+        <span class="hintline" id="ol-msg"></span>
+      </div>
+      <div class="bar" id="ol-bar" style="display:none"><i></i></div>
+      <div style="margin-top:10px;max-height:56vh;overflow:auto">
+        <table class="shots ol">
+          <thead><tr>
+            <th class="ck" style="width:32px"></th>
+            <th class="srt" data-k="name">成片<span class="arr"></span></th>
+            <th class="srt" data-k="angle" style="width:92px">角度<span class="arr"></span></th>
+            <th class="srt" data-k="ver" style="width:52px">版本<span class="arr"></span></th>
+            <th class="srt" data-k="dur" style="width:58px">时长<span class="arr"></span></th>
+            <th class="srt" data-k="size" style="width:66px">体积<span class="arr"></span></th>
+            <th class="srt" data-k="kbps" style="width:78px">码率<span class="arr"></span></th>
+            <th class="srt" data-k="clips" style="width:48px">镜头<span class="arr"></span></th>
+            <th class="srt" data-k="mtime" style="width:112px">生成时间<span class="arr"></span></th>
+            <th style="width:120px"></th>
+          </tr></thead>
+          <tbody id="ol-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 勾选后浮在底部的批量操作条：列表滚多远都能点到 -->
+    <div class="olfab" id="ol-fab">
+      <b id="olfab-n">已选 0 条</b>
+      <span class="sz" id="olfab-sz"></span>
+      <span class="sp"></span>
+      <button class="g sm" id="olfab-clear">取消选择</button>
+      <button class="b sm" id="olfab-dl">下载所选</button>
+      <button class="g sm" id="olfab-del">删除</button>
+    </div>
+  </section>
+
+  <div class="navrow">
+    <button class="g" id="btn-prev">← 上一步</button>
+    <span class="hintline" id="nav-hint"></span>
+    <button class="b" id="btn-next">下一步 →</button>
+  </div>
+</main>
+
+<div id="toast"></div>
+
+<div class="modal" id="modal">
+  <div class="sheet">
+    <h3>设置</h3>
+    <div class="hintline">接口地址填 OpenAI 兼容的（DeepSeek、豆包、通义、Kimi、本地 llama.cpp / Ollama / LM Studio 都行）。<b>本地地址可以留空 API Key。</b>不填也能用，就是脚本走模板、打标只算视觉特征。</div>
+
+    <div class="sec">
+      <label class="f">文本模型 Base URL</label>
+      <input type="text" id="c-base" placeholder="https://api.deepseek.com  或  http://127.0.0.1:9931">
+      <div class="grid2" style="margin-top:8px">
+        <div><label class="f">API Key（本地可留空）</label><input type="password" id="c-key" placeholder="sk-... 或留空"></div>
+        <div><label class="f">模型名</label><input type="text" id="c-model" placeholder="deepseek-chat"></div>
+      </div>
+      <div style="margin-top:8px"><label class="f">视觉模型名（打标用，留空则用上面的模型）</label>
+        <input type="text" id="c-vmodel" placeholder="如 qwen-vl-plus / gpt-4o-mini / llava"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="g sm" id="btn-test">测试连接</button>
+        <span class="hintline" id="test-msg"></span>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button class="g sm" id="btn-llmscan">扫描本机模型</button>
+        <span class="hintline" id="llmscan-msg">自动找 llama.cpp / Ollama / LM Studio</span>
+      </div>
+      <div id="scan-list" style="margin-top:8px"></div>
+
+      <div class="row" style="margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)">
+        <button class="g sm" id="btn-lstart">启动本地模型</button>
+        <button class="g sm" id="btn-lstop">停止</button>
+        <span class="hintline" id="lstat">检查中…</span>
+      </div>
+      <div class="hintline" id="ltail" style="margin-top:6px;display:none;word-break:break-all"></div>
+      <details style="margin-top:8px">
+        <summary class="hintline" style="cursor:pointer">llama.cpp 启动参数（一般不用改）</summary>
+        <div class="grid2" style="margin-top:8px">
+          <div><label class="f">llama.cpp 目录</label><input type="text" id="c-ldir" placeholder="D:\llama.cpp"></div>
+          <div><label class="f">端口</label><input type="number" id="c-lport" placeholder="9931"></div>
+        </div>
+        <div style="margin-top:8px"><label class="f">模型文件（留空 = models 里最大的 gguf）</label>
+          <input type="text" id="c-lmodel" placeholder="D:\llama.cpp\models\xxx.gguf"></div>
+        <div style="margin-top:8px"><label class="f">额外参数</label>
+          <input type="text" id="c-lextra" placeholder="-ngl 99 -c 16384 -ub 32 -cmoe --moe-cache-mib 12288"></div>
+      </details>
+    </div>
+
+    <div class="sec">
+      <label class="f">画幅</label>
+      <div class="row" id="presets">
+        <button class="g sm on" data-w="1080" data-h="1920">竖屏 1080×1920</button>
+        <button class="g sm" data-w="1920" data-h="1080">横屏 1920×1080</button>
+        <button class="g sm" data-w="1080" data-h="1080">方形 1080×1080</button>
+      </div>
+      <div class="grid3" style="margin-top:10px">
+        <div><label class="f">字幕字号</label><input type="number" id="c-subsize" min="24" max="140"></div>
+        <div><label class="f">素材填充</label><select id="c-fit"><option value="cover">裁切填满</option><option value="contain">留黑边</option></select></div>
+        <div><label class="f">画质 CRF（小=好）</label><input type="number" id="c-crf" min="14" max="32"></div>
+      </div>
+      <div class="grid2" style="margin-top:8px">
+        <div><label class="f">BGM</label><div class="hintline">在「⑤ 成片」那一步选曲和调音量，这里不再重复设置</div></div>
+        <div></div>
+      </div>
+      <label class="hintline" style="display:flex;gap:6px;align-items:center;margin-top:10px">
+        <input type="checkbox" id="c-sub"> 烧录字幕</label>
+    </div>
+
+    <div class="row" style="margin-top:18px;justify-content:flex-end">
+      <button class="g" id="btn-close">关闭</button>
+      <button class="b" id="btn-savecfg">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="bm">
+  <div class="sheet" style="max-width:700px">
+    <h3>批量出片 <span class="hintline" id="bm-sub"></span></h3>
+    <div class="hintline">每条脚本依次走完 配音 → 分镜 → 合成，全程本机跑，可以挂着去做别的事。</div>
+
+    <div id="bm-list" style="margin-top:12px;max-height:32vh;overflow:auto"></div>
+    <div class="row" style="margin-top:8px;gap:6px">
+      <button class="g sm" id="bm-all">全选</button>
+      <button class="g sm" id="bm-none">全不选</button>
+      <button class="g sm" id="bm-ready">只选还没出片的</button>
+    </div>
+
+    <div class="grid3" style="margin-top:14px">
+      <div><label class="f">每个脚本出几条</label>
+        <select id="bm-var">
+          <option value="1">1 条</option><option value="2">2 条（换一套镜头）</option>
+          <option value="3">3 条</option><option value="4">4 条</option><option value="5">5 条</option>
+        </select></div>
+      <div><label class="f">配音</label>
+        <select id="bm-tts">
+          <option value="0">缺的才补</option><option value="1">全部重做</option>
+        </select></div>
+      <div><label class="f">分镜</label>
+        <select id="bm-align">
+          <option value="1">每版重新随机</option><option value="0">保留已调好的</option>
+        </select></div>
+    </div>
+
+    <div class="row" style="margin-top:16px">
+      <button class="b" id="bm-go">开始批量生成</button>
+      <button class="g" id="bm-close">关闭</button>
+      <span class="hintline" id="bm-msg"></span>
+    </div>
+    <div class="bar" id="bm-bar" style="display:none;margin-top:10px"><i></i></div>
+    <div id="bm-out" style="margin-top:12px"></div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const S = {
+  cfg:null, pool:[], projects:[], pid:null, project:null, idx:0, step:1,
+  selmode:false, sel:new Set(),
+  angles:["pain","compare","spec"], lastOut:null, busy:false,
+  outs:[], outSel:new Set(), outSort:{key:"mtime", dir:-1}
+};
+const ANGLE_LABEL = {pain:"痛点切入", compare:"对比实测", spec:"参数硬核", avoid:"避坑提醒", scene:"场景代入"};
+
+/* ---------- 工具 ---------- */
+function toast(msg, ms=2400){
+  const t = $("#toast"); t.textContent = msg; t.classList.add("on");
+  clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove("on"), ms);
+}
+async function api(u, body, _retried){
+  const opt = body===undefined ? {} : {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)};
+  let j;
+  try{
+    const r = await fetch(u, opt);
+    j = await r.json().catch(()=>({error:"返回不是 JSON"}));
+    if(!r.ok && !j.error) j.error = "HTTP " + r.status;
+  }catch(e){ return {error:"连不上本地服务：" + e.message}; }
+  if(j && j.project && j.project.id) cacheProject(j.project);   // 顺手在浏览器里留一份备份
+  // 项目记录没了（多见于删成片时被连带清掉）：重建后把这次请求重发一遍
+  if(j.error === "项目不存在" && !_retried && body && S.project && (body.pid || body.id)){
+    const np = await rebuildProject();
+    if(np){
+      const nb = Object.assign({}, body);
+      if(nb.pid) nb.pid = np.id;
+      if(nb.id) nb.id = np.id;
+      return api(u, nb, true);
+    }
+  }
+  return j;
+}
+function pollJob(id, onTick){
+  return new Promise(res=>{
+    const t0 = Date.now();
+    const iv = setInterval(async ()=>{
+      const j = await api("/api/job?id=" + id);
+      if(onTick) onTick(j);
+      if(j.state === "done" || j.state === "error" || j.error){ clearInterval(iv); res(j); }
+      else if(Date.now() - t0 > 900000){ clearInterval(iv); res({state:"error", error:"等太久了，已停止等待（后台可能还在跑）"}); }
+    }, 600);
+  });
+}
+function fmtDur(s){ s = Math.max(0, Math.round(s*10)/10); return s.toFixed(1) + "s"; }
+function fmtDurLong(s){
+  s = Math.max(0, Math.round(s || 0));
+  if(s < 60) return s + "秒";
+  const m = Math.floor(s / 60), r = s % 60;
+  return m + "分" + (r ? r + "秒" : "");
+}
+function fmtTC(s){ s = Math.max(0,s); const m = Math.floor(s/60), r = s - m*60; return m + ":" + (r<10?"0":"") + r.toFixed(1); }
+function bar(el, p){ const i = el.querySelector("i"); el.style.display = "block"; i.style.width = Math.round(Math.max(0,Math.min(1,p))*100) + "%"; }
+function mk(tag, cls, txt){ const e = document.createElement(tag); if(cls) e.className = cls; if(txt!=null) e.textContent = txt; return e; }
+
+/* ---------- 步骤条 ---------- */
+const STEPS = [
+  {n:1,t:"素材",s:"加入切片并打标"},
+  {n:2,t:"脚本",s:"按角度生成口播"},
+  {n:3,t:"配音",s:"逐句时间戳"},
+  {n:4,t:"分镜",s:"句子找镜头"},
+  {n:5,t:"成片",s:"渲染导出"},
+];
+function renderSteps(){
+  const box = $("#steps"); box.innerHTML = "";
+  STEPS.forEach(st=>{
+    const d = mk("div", "step" + (S.step===st.n?" on":""));
+    d.appendChild(mk("div","n","0"+st.n));
+    d.appendChild(mk("div","t",st.t));
+    d.appendChild(mk("div","s",st.s));
+    d.onclick = ()=> go(st.n);
+    box.appendChild(d);
+  });
+}
+function go(n){
+  if(n >= 3 && !(S.project && S.project.scripts && S.project.scripts.length)){
+    toast("先生成脚本"); n = 2;
+  }
+  S.step = n;
+  [1,2,3,4,5].forEach(i => $("#v"+i).hidden = (i!==n));
+  renderSteps();
+  if(n===1) loadPool();
+  if(n===2) renderScripts();
+  if(n===3) renderTTS();
+  if(n===4) renderShots();
+  if(n===5){ loadBgm(); renderOut(); }
+  renderNav(n);
+  window.scrollTo({top:0, behavior:"smooth"});
+}
+const NAVHINT = {
+  1: "素材就绪就去写脚本",
+  2: "脚本定稿后去配音",
+  3: "配音完成去对分镜",
+  4: "分镜满意就去合成",
+  5: "合成完可以下载，也可以回去做下一条"
+};
+function renderNav(n){
+  $("#btn-prev").disabled = (n <= 1);
+  $("#btn-next").disabled = (n >= 5);
+  $("#btn-next").textContent = n >= 5 ? "已是最后一步" : "下一步 →";
+  $("#nav-hint").textContent = NAVHINT[n] || "";
+}
+$("#btn-prev").onclick = ()=> go(Math.max(1, S.step - 1));
+$("#btn-next").onclick = ()=> go(Math.min(5, S.step + 1));
+
+/* ---------- 配置 ---------- */
+async function loadCfg(){
+  const c = await api("/api/pipe/config");
+  S.cfg = c;
+  $("#c-base").value = c.llm.base_url || "";
+  $("#c-key").value = c.llm.api_key || "";
+  $("#c-model").value = c.llm.model || "";
+  $("#c-vmodel").value = c.llm.vision_model || "";
+  $("#c-ldir").value = c.llm.local_dir || "";
+  $("#c-lport").value = c.llm.local_port || 9931;
+  $("#c-lmodel").value = c.llm.local_model || "";
+  $("#c-lextra").value = c.llm.local_extra || "";
+  const v = c.video;
+  $("#c-subsize").value = v.sub_size; $("#c-fit").value = v.fit; $("#c-crf").value = v.crf;
+  $("#c-sub").checked = !!v.subtitle;
+  const sel = $("#voice"); sel.innerHTML = "";
+  (c.voices||[]).forEach(x=>{
+    const o = mk("option", null, x.label); o.value = x.id; sel.appendChild(o);
+  });
+  sel.value = c.tts.voice;
+  const rate = parseInt(String(c.tts.rate).replace(/[^-\d]/g,"")) || 0;
+  $("#rate").value = rate; $("#rate-v").textContent = (rate>=0?"+":"") + rate + "%";
+  renderLlmChip(c);
+}
+function shortModel(id){
+  const s = String(id || "").split(/[\\/]/).pop();
+  return s.replace(/\.gguf$/i, "").replace(/-Q\d(_[A-Z0-9_]+)?$/i, "").slice(0, 42) || "默认模型";
+}
+function renderLlmChip(c){
+  const el = $("#chip-llm"); if(!el) return;
+  const l = (c || {}).llm || {};
+  if(l.ready){
+    el.textContent = (l.local ? "本地 · " : "") + shortModel(l.model);
+    el.classList.add("on");
+    el.title = (l.local ? "本地模型（Key 可不填）：" : "云端模型：") + (l.base_url || "");
+  }else{
+    el.textContent = "无模型 · 脚本走模板";
+    el.classList.remove("on");
+    el.title = l.ready_why || "未配置大模型";
+  }
+}
+function keyVal(){
+  // 页面上显示的是打码后的 Key（****），直接回存会把真实的 Key 覆盖成一串星号
+  const v = $("#c-key").value.trim();
+  return /^\*+/.test(v) ? "__KEEP__" : v;
+}
+function llmForm(){
+  return {
+    base_url:$("#c-base").value.trim(), api_key:keyVal(),
+    model:$("#c-model").value.trim(), vision_model:$("#c-vmodel").value.trim(),
+    local_dir:$("#c-ldir").value.trim(), local_port:+$("#c-lport").value || 9931,
+    local_model:$("#c-lmodel").value.trim(), local_extra:$("#c-lextra").value.trim()
+  };
+}
+async function saveCfg(){
+  const rate = parseInt($("#rate").value,10);
+  const body = {
+    llm: llmForm(),
+    video:{ w:S.cfg.video.w, h:S.cfg.video.h, sub_size:+$("#c-subsize").value,
+            fit:$("#c-fit").value, crf:+$("#c-crf").value,
+            subtitle:$("#c-sub").checked },
+    tts:{ voice:$("#voice").value, rate:(rate>=0?"+":"") + rate + "%" }
+  };
+  const r = await api("/api/pipe/config", body);
+  if(r.error){ toast(r.error); return; }
+  S.cfg = r.config; toast("设置已保存"); $("#modal").classList.remove("on");
+  renderLlmChip(r.config);
+}
+
+/* ---------- ① 素材 ---------- */
+async function loadPool(){
+  const r = await api("/api/pipe/pool");
+  S.pool = r.items || [];
+  const pool = S.pool.length, tagged = r.tagged || 0, sem = r.semantic || 0;
+  $("#k-pool").textContent = pool;
+  $("#k-tag").textContent = tagged;
+  $("#k-sem").textContent = sem;
+  $("#k-dur").textContent = fmtDurLong(S.pool.reduce((a,b)=>a+(b.dur||0),0));
+  const pct = pool ? Math.round(tagged / pool * 100) : 0;
+  $("#k-tag-sub").textContent = pool ? ("已打标 " + pct + "%") : "已打标";
+  const fill = $("#k-tag-fill");
+  fill.style.width = pct + "%";
+  fill.style.background = pct >= 100 ? "var(--ok)" : "var(--accent)";
+  $("#st-sem").classList.toggle("dim", !sem);
+  $("#st-sem").title = sem ? "有场景/主体/动作这类语义标签的素材数"
+                           : "当前只有视觉特征标签。设置里换一个带视觉的模型并重打，才会生成语义标签（对齐更准）";
+  // 打标按钮把「还剩多少条没打」直接标在按钮上，全部打完就置灰
+  const untag = Math.max(0, pool - tagged);
+  const bt = $("#btn-tag");
+  bt.innerHTML = "";
+  bt.appendChild(document.createTextNode("打标"));
+  if(untag) bt.appendChild(mk("i","bdg",String(untag)));
+  bt.disabled = untag === 0;
+  bt.title = untag ? ("给 " + untag + " 条还没打标的素材打标")
+                   : "全部素材都已打标；要重来请用「全部重打」";
+  // 池子变了，把已经不存在的 id 从选中集合里剔掉
+  const alive = new Set(S.pool.map(x=>x.id));
+  [...S.sel].forEach(id=>{ if(!alive.has(id)) S.sel.delete(id); });
+
+  const box = $("#pool"); box.innerHTML = "";
+  $("#pool-empty").hidden = S.pool.length > 0;
+  S.pool.forEach(it=>{
+    const d = mk("div","pi" + (S.sel.has(it.id) ? " sel" : ""));
+    const img = mk("img"); img.loading = "lazy"; img.src = "/api/pipe/thumb?id=" + it.id;
+    img.onerror = ()=> img.remove();
+    d.appendChild(img);
+    const m = mk("div","m");
+    const nm = mk("div","nm", it.name); nm.title = it.path + "  @ " + it.start + "s";
+    m.appendChild(nm);
+    m.appendChild(mk("div","du", fmtDur(it.dur || 0) + (it.semantic ? " · 语义" : "")));
+    (it.tags||[]).slice(0,3).forEach(t=> m.appendChild(mk("span","tag" + (it.semantic?" sem":""), t)));
+    d.appendChild(m);
+
+    if(S.selmode){
+      const cb = mk("input", "cb"); cb.type = "checkbox"; cb.checked = S.sel.has(it.id);
+      cb.onclick = ev=>{ ev.stopPropagation(); toggleSel(it.id, cb.checked); };
+      d.appendChild(cb);
+      d.onclick = ()=>{ toggleSel(it.id, !S.sel.has(it.id)); };
+    }
+    const x = mk("button","x","×"); x.title = "移出素材池";
+    x.onclick = async ev=>{
+      ev.stopPropagation();
+      await api("/api/pipe/pool/drop",{id:it.id});
+      loadPool();
+    };
+    d.appendChild(x);
+    box.appendChild(d);
+  });
+  updateSelBar();
+}
+
+function toggleSel(id, on){
+  if(on) S.sel.add(id); else S.sel.delete(id);
+  loadPool();
+}
+function updateSelBar(){
+  $("#seltools").hidden = !S.selmode;
+  $("#sel-cnt").textContent = "已选 " + S.sel.size + " 条";
+  $("#btn-seldel").disabled = S.sel.size === 0;
+  $("#btn-seldel").textContent = S.sel.size ? ("删除所选 " + S.sel.size + " 条") : "删除所选";
+  const m = $("#btn-selmode");
+  m.classList.toggle("on", S.selmode);
+  m.textContent = S.selmode ? "多选中" : "多选";
+}
+$("#btn-selmode").onclick = ()=>{
+  S.selmode = !S.selmode;
+  if(!S.selmode) S.sel.clear();
+  loadPool();
+};
+$("#btn-seloff").onclick = ()=>{ S.selmode = false; S.sel.clear(); loadPool(); };
+$("#btn-selall").onclick = ()=>{ S.pool.forEach(x=>S.sel.add(x.id)); loadPool(); };
+$("#btn-selinv").onclick = ()=>{
+  const next = new Set();
+  S.pool.forEach(x=>{ if(!S.sel.has(x.id)) next.add(x.id); });
+  S.sel = next; loadPool();
+};
+$("#btn-seluntag").onclick = ()=>{
+  S.sel = new Set(S.pool.filter(x=>!x.tagged).map(x=>x.id)); loadPool();
+};
+$("#btn-seldel").onclick = async ()=>{
+  const ids = [...S.sel];
+  if(!ids.length) return;
+  if(!confirm("把选中的 " + ids.length + " 条素材移出素材池？\n（只从池子里移除，不会删原始视频文件）")) return;
+  $("#btn-seldel").disabled = true;
+  const r = await api("/api/pipe/pool/drop", {ids});
+  S.sel.clear();
+  await loadPool();
+  toast("已移出 " + (r.removed || ids.length) + " 条");
+};
+function folderLines(){
+  return $("#folder").value.split("\n")
+    .map(s=>s.trim().replace(/^["']|["']$/g,"").replace(/[\\/]+$/,""))
+    .filter(Boolean);
+}
+function refreshFolCnt(){
+  const n = folderLines().length;
+  $("#fol-cnt").textContent = n ? ("共 " + n + " 个目录") : "还没填目录";
+}
+function saveFolders(){
+  localStorage.setItem("pipe_folders", $("#folder").value);
+  refreshFolCnt();
+}
+$("#folder").addEventListener("input", saveFolders);
+$("#btn-dir").onclick = async ()=>{
+  $("#scan-msg").textContent = "正在打开选择窗口…";
+  const r = await api("/api/pipe/dialog", {});
+  if(r.state === "ok"){
+    const cur = folderLines();
+    if(!cur.includes(r.path)) cur.push(r.path);
+    $("#folder").value = cur.join("\n");
+    saveFolders();
+    $("#scan-msg").textContent = "已加入第 " + cur.length + " 个目录；再点一次可以继续加";
+  }
+  else $("#scan-msg").textContent = r.message || "";
+};
+$("#btn-scan").onclick = async ()=>{
+  const folders = folderLines();
+  if(!folders.length){ toast("先填或选至少一个文件夹"); return; }
+  $("#btn-scan").disabled = true;
+  $("#scan-msg").textContent = "准备扫描 " + folders.length + " 个目录…";
+  const r = await api("/api/pipe/scan", {folders});
+  if(r.error){ toast(r.error); $("#btn-scan").disabled = false; return; }
+  const j = await pollJob(r.job, j=>{
+    bar($("#scan-bar"), j.progress||0); $("#scan-msg").textContent = j.message || "";
+  });
+  $("#scan-bar").style.display = "none";
+  $("#btn-scan").disabled = false;
+  $("#scan-msg").textContent = j.state === "error" ? ("失败：" + j.error) : j.message;
+  loadPool();
+};
+$("#btn-addvid").onclick = async ()=>{
+  const v = $("#vids").value;
+  if(!v){ toast("先选一个已检测的视频"); return; }
+  const r = await api("/api/pipe/addvideo", {token:v});
+  if(r.error) toast(r.error); else { toast("导入 " + r.added + " 个镜头"); loadPool(); }
+};
+$("#btn-tag").onclick = ()=> doTag(false);
+$("#btn-tagall").onclick = ()=> doTag(true);
+function refreshTagBtn(){
+  const untag = S.pool.filter(x=>!x.tagged).length;
+  $("#btn-tag").disabled = untag === 0;
+  $("#btn-tag").title = untag ? ("给 " + untag + " 条还没打标的素材打标")
+                              : "全部素材都已打标；要重来请用「全部重打」";
+}
+async function doTag(force){
+  $("#btn-tag").disabled = $("#btn-tagall").disabled = true;
+  const r = await api("/api/pipe/tag", {force});
+  if(r.error){ toast(r.error); $("#btn-tagall").disabled = false; refreshTagBtn(); return; }
+  if(!r.job){ toast(r.message || "没有需要打标的素材"); $("#btn-tagall").disabled = false; refreshTagBtn(); return; }
+  const j = await pollJob(r.job, j=>{ bar($("#tag-bar"), j.progress||0); $("#tag-msg").textContent = j.message || ""; });
+  $("#tag-bar").style.display = "none";
+  $("#btn-tag").disabled = $("#btn-tagall").disabled = false;
+  $("#tag-msg").textContent = j.state === "error" ? ("打标失败：" + j.error) : (j.message + (j.warn ? "　⚠ " + j.warn[0] : ""));
+  loadPool();
+}
+$("#btn-clearpool").onclick = async ()=>{
+  if(!confirm("清空素材池？（不会删原始文件）")) return;
+  await api("/api/pipe/pool/clear", {});
+  loadPool(); toast("已清空");
+};
+
+/* ---------- ② 脚本 ---------- */
+async function loadAngles(){
+  let items = null;
+  try{ const r = await api("/api/pipe/angles"); items = r.items || null; }catch(e){ items = null; }
+  if(!items || !items.length){
+    items = Object.entries(ANGLE_LABEL).map(([k,label])=>({key:k,label:label,hint:"",group:"classic"}));
+  }
+  S.angleMeta = items;
+  items.forEach(a=>{ ANGLE_LABEL[a.key] = a.label; });
+  renderAngles();
+}
+function renderAngles(){
+  const box = $("#angles"); box.innerHTML = "";
+  const meta = S.angleMeta && S.angleMeta.length ? S.angleMeta
+    : Object.entries(ANGLE_LABEL).map(([k,label])=>({key:k,label:label,hint:"",group:"classic"}));
+  [["classic","经典"],["more","更多风格"]].forEach(([g, name])=>{
+    const items = meta.filter(a=>(a.group||"classic") === g);
+    if(!items.length) return;
+    const wrap = mk("div","agroup");
+    wrap.appendChild(mk("div","gname", name));
+    const row = mk("div","row"); row.style.gap = "6px";
+    items.forEach(a=>{
+      const on = S.angles.includes(a.key);
+      const b = mk("button", "g sm" + (on ? " on" : ""), a.label);
+      b.title = a.hint || "";
+      b.onclick = ()=>{
+        S.angles = S.angles.includes(a.key) ? S.angles.filter(x=>x!==a.key) : [...S.angles, a.key];
+        renderAngles();
+      };
+      row.appendChild(b);
+    });
+    wrap.appendChild(row);
+    box.appendChild(wrap);
+  });
+  const pr = $("#angle-presets");
+  if(!pr) return;
+  pr.innerHTML = "";
+  const preset = [["经典 5 种", ()=>["pain","compare","spec","avoid","scene"]],
+                  ["全部", ()=> (S.angleMeta||[]).map(a=>a.key)],
+                  ["随机 3 种", ()=>{
+                    const all = (S.angleMeta||[]).map(a=>a.key).slice();
+                    const pick = [];
+                    while(pick.length < 3 && all.length) pick.push(all.splice(Math.floor(Math.random()*all.length),1)[0]);
+                    return pick;
+                  }],
+                  ["清空", ()=> []]];
+  preset.forEach(([label, fn])=>{
+    const b = mk("button","g sm", label);
+    b.style.fontSize = "11.5px"; b.style.opacity = "0.85";
+    b.onclick = ()=>{ S.angles = fn(); renderAngles(); };
+    pr.appendChild(b);
+  });
+  const tip = mk("span","hintline", "已选 " + S.angles.length + " 个");
+  pr.appendChild(tip);
+}
+function productBody(){
+  return {
+    name:$("#p-name").value.trim(), audience:$("#p-aud").value.trim(),
+    points:$("#p-points").value, pain:$("#p-pain").value.trim(),
+    price:$("#p-price").value.trim(), proof:$("#p-proof").value.trim(), offer:$("#p-price").value.trim()
+  };
+}
+async function ensureProject(force){
+  if(S.pid && !force) return S.pid;
+  const nm = $("#p-name").value.trim() || (S.project && S.project.name) ||
+             ("成片 " + new Date().toLocaleString("zh-CN",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"}));
+  const r = await api("/api/pipe/project", {action:"new", name:nm});
+  if(r.error){ toast(r.error); return null; }
+  S.project = r.project; S.pid = r.project.id;
+  localStorage.setItem("pipe_pid", S.pid);
+  return S.pid;
+}
+
+/* 项目在浏览器里留一份备份：万一本机 project.json 被删（旧版删成片会连带清），
+   刷新时还能把脚本和商品信息恢复回来 */
+function cacheProject(p){
+  try{
+    localStorage.setItem("pipe_proj_bak", JSON.stringify({
+      id:p.id, name:p.name, product:p.product || {}, scripts:p.scripts || [],
+      active:p.active || 0, t:Date.now()
+    }));
+  }catch(e){}
+}
+function loadProjCache(){
+  try{ return JSON.parse(localStorage.getItem("pipe_proj_bak") || "null"); }catch(e){ return null; }
+}
+
+/* 项目记录丢了（老版本删成片时会把 project.json 一起清掉）：按页面上的脚本就地重建，
+   再把刚才失败的那次请求重发一遍，用户无感继续 */
+async function rebuildProject(){
+  if(S._rebuilding) return null;
+  S._rebuilding = true;
+  try{
+    const src = JSON.parse(JSON.stringify(S.project || {}));
+    const id = await ensureProject(true);
+    if(!id) return null;
+    const saved = await api("/api/pipe/project", {
+      action:"save", id, name:src.name || undefined,
+      product:src.product || {}, active:src.active || 0, scripts:src.scripts || []
+    });
+    const pj = (saved && saved.project) || S.project;
+    S.pid = pj.id || id; S.project = pj;
+    localStorage.setItem("pipe_pid", S.pid);
+    toast("项目记录已自动重建，商品信息和脚本都保住了", 5000);
+    return pj;
+  } finally {
+    S._rebuilding = false;
+  }
+}
+$("#btn-script").onclick = async ()=>{
+  if(!$("#p-name").value.trim()){ toast("先填品名"); return; }
+  if(!S.angles.length){ toast("至少选一个角度"); return; }
+  const pid = await ensureProject(); if(!pid) return;
+  $("#btn-script").disabled = true;
+  const body = { pid, product:productBody(), angles:S.angles,
+                 target:+$("#p-target").value, use_llm:$("#use-llm").checked };
+  const r = await api("/api/pipe/script", body);
+  if(r.error){ toast(r.error); $("#btn-script").disabled = false; return; }
+  const j = await pollJob(r.job, j=>{ bar($("#script-bar"), j.progress||0); $("#script-msg").textContent = j.message||""; });
+  $("#script-bar").style.display = "none";
+  $("#btn-script").disabled = false;
+  if(j.state === "error"){ $("#script-msg").textContent = "失败：" + j.error; return; }
+  const mode = (j.result||{}).mode;
+  $("#script-msg").innerHTML = "";
+  $("#script-msg").appendChild(document.createTextNode(j.message + "　"));
+  const chip = mk("span","chip" + (mode==="llm"?" on":""), mode==="llm" ? "大模型" : "模板");
+  $("#script-msg").appendChild(chip);
+  if((j.result||{}).note) $("#script-msg").appendChild(mk("span", null, "　" + j.result.note));
+  await reloadProject();
+  renderScripts();
+  if(S.project && S.project.scripts.length) toast("脚本好了，下一步配音");
+};
+async function reloadProject(){
+  if(!S.pid) return null;
+  const r = await api("/api/pipe/project?id=" + S.pid);
+  if(r.error) return null;
+  S.project = r.project;
+  S.idx = Math.min(S.project.active||0, Math.max(0,(S.project.scripts||[]).length-1));
+  return S.project;
+}
+function renderScripts(){
+  const card = $("#scripts-card"), box = $("#scripts");
+  if(!S.project || !(S.project.scripts||[]).length){ card.hidden = true; return; }
+  card.hidden = false; box.innerHTML = "";
+  S.project.scripts.forEach((s,i)=>{
+    const on = i === S.idx;
+    const d = mk("div","script" + (on?" on":""));
+    const hd = mk("div","hd");
+    hd.appendChild(mk("span","ttl", (i+1) + ". " + (s.angle_label||ANGLE_LABEL[s.angle]||"脚本")));
+    hd.appendChild(mk("span","chip", (s.sentences||[]).length + " 句"));
+    const chars = (s.sentences||[]).reduce((a,b)=>a+(b.text||"").length,0);
+    hd.appendChild(mk("span","chip", chars + " 字 ≈ " + (chars/4.6).toFixed(0) + "s"));
+    if(s.tts) hd.appendChild(mk("span","chip on","已配音"));
+    if(s.plan) hd.appendChild(mk("span","chip on","已分镜"));
+    if((s.outs||[]).length) hd.appendChild(mk("span","chip on","出过 " + s.outs.length + " 条"));
+    hd.onclick = async ()=>{
+      S.idx = i;
+      await api("/api/pipe/project", {action:"save", id:S.pid, active:i});
+      renderScripts();
+    };
+    d.appendChild(hd);
+    if(on){
+      (s.sentences||[]).forEach((x, si)=>{
+        const row = mk("div","sent");
+        const ta = document.createElement("textarea"); ta.value = x.text; ta.rows = 1;
+        ta.oninput = ()=> { x.text = ta.value; ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; };
+        ta.onchange = ()=> saveScript(i);
+        const vi = document.createElement("input"); vi.type = "text"; vi.value = x.hint || "";
+        vi.placeholder = "画面提示";
+        vi.onchange = ()=> { x.hint = vi.value; saveScript(i); };
+        row.appendChild(ta); row.appendChild(vi);
+        d.appendChild(row);
+      });
+      const row = mk("div","row"); row.style.marginTop = "10px";
+      const b1 = mk("button","b sm","用这条配音 →");
+      b1.onclick = async ()=>{ S.idx = i; await api("/api/pipe/project",{action:"save",id:S.pid,active:i}); go(3); };
+      row.appendChild(b1);
+      d.appendChild(row);
+    }
+    box.appendChild(d);
+  });
+}
+let saveTimer = null;
+function saveScript(i){
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async ()=>{
+    await api("/api/pipe/project", {action:"save", id:S.pid, idx:i, script:{sentences:S.project.scripts[i].sentences}});
+  }, 700);
+}
+
+/* ---------- ③ 配音 ---------- */
+async function renderTTS(){
+  const box = $("#tts-out"); box.innerHTML = "";
+  const s = curScript();
+  if(!s){ box.appendChild(mk("div","empty","先去上一步生成脚本")); return; }
+  if(!s.tts){
+    box.appendChild(mk("div","empty","还没配音。点上面的「生成配音」。"));
+    return;
+  }
+  const t = s.tts;
+  const note = mk("div","note" + (t.engine==="edge"?" ok":""), "");
+  note.textContent = (t.engine==="edge" ? "edge-tts 在线配音" : "Windows 离线语音") +
+    " · " + t.sentences.length + " 句 · " + t.total.toFixed(1) + " 秒" + (t.note ? "　" + t.note : "");
+  box.appendChild(note);
+  const au = document.createElement("audio");
+  au.controls = true; au.style.width = "100%"; au.style.marginTop = "10px";
+  au.src = "/api/pipe/audio?pid=" + S.pid + "&idx=" + S.idx + "&t=" + Date.now();
+  box.appendChild(au);
+  const tb = mk("table","shots");
+  tb.innerHTML = "<thead><tr><th style='width:56px'>序号</th><th style='width:136px'>时间码</th><th>口播</th></tr></thead>";
+  const tbdy = document.createElement("tbody");
+  t.sentences.forEach((x,i)=>{
+    const tr = document.createElement("tr");
+    tr.innerHTML = "<td class='tc'>" + (i+1) + "</td><td class='tc'>" + fmtTC(x.start) + " – " + fmtTC(x.end) + "</td><td>" + escapeHtml(x.text) + "</td>";
+    tbdy.appendChild(tr);
+  });
+  tb.appendChild(tbdy);
+  box.appendChild(tb);
+}
+function escapeHtml(s){ return String(s).replace(/[&<>]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+function curScript(){
+  if(!S.project || !(S.project.scripts||[]).length) return null;
+  return S.project.scripts[Math.min(S.idx, S.project.scripts.length-1)];
+}
+$("#rate").oninput = e=>{
+  const v = parseInt(e.target.value,10);
+  $("#rate-v").textContent = (v>=0?"+":"") + v + "%";
+};
+$("#btn-tts").onclick = async ()=>{
+  const s = curScript(); if(!s){ toast("先生成脚本"); return; }
+  await api("/api/pipe/config", {tts:{voice:$("#voice").value,
+    rate:(parseInt($("#rate").value,10)>=0?"+":"") + $("#rate").value + "%"}});
+  $("#btn-tts").disabled = true;
+  const r = await api("/api/pipe/tts", {pid:S.pid, idx:S.idx});
+  if(r.error){ toast(r.error); $("#btn-tts").disabled = false; return; }
+  const j = await pollJob(r.job, j=>{ bar($("#tts-bar"), j.progress||0); $("#tts-msg").textContent = j.message||""; });
+  $("#tts-bar").style.display = "none";
+  $("#btn-tts").disabled = false;
+  $("#tts-msg").textContent = j.state === "error" ? ("失败：" + j.error) : j.message;
+  await reloadProject(); renderTTS();
+};
+
+/* ---------- ④ 分镜 ---------- */
+$("#btn-align").onclick = async ()=>{
+  const s = curScript(); if(!s){ toast("先生成脚本"); return; }
+  if(!s.tts){ toast("先配音"); go(3); return; }
+  $("#btn-align").disabled = true;
+  const r = await api("/api/pipe/align", {pid:S.pid, idx:S.idx});
+  $("#btn-align").disabled = false;
+  if(r.error){ toast(r.error); return; }
+  await reloadProject(); renderShots(); toast("对齐完成：" + r.plan.clips.length + " 个镜头");
+};
+function renderShots(){
+  const s = curScript(), wrap = $("#shots-wrap");
+  wrap.innerHTML = "";
+  if(!s || !s.plan){
+    $("#k-clips").textContent = 0; $("#k-mats").textContent = 0;
+    $("#k-total").textContent = "0s"; $("#k-reuse").textContent = 0;
+    wrap.appendChild(mk("div","empty","还没对齐。点右上角「自动对齐」。"));
+    return;
+  }
+  const p = s.plan;
+  $("#k-clips").textContent = p.clips.length;
+  $("#k-mats").textContent = p.stats.materials;
+  $("#k-total").textContent = p.total.toFixed(1) + "s";
+  $("#k-reuse").textContent = p.stats.reuse;
+  const tb = mk("table","shots");
+  tb.innerHTML = "<thead><tr><th style='width:34px'>#</th><th style='width:104px'>时间码</th><th style='width:88px'>素材</th><th>口播</th><th style='width:196px'>标签</th><th style='width:82px'></th></tr></thead>";
+  const body = document.createElement("tbody");
+  p.clips.forEach((c, i)=>{
+    const tr = document.createElement("tr");
+    const td0 = document.createElement("td"); td0.className = "tc"; td0.textContent = i+1;
+    const td1 = document.createElement("td"); td1.className = "tc";
+    td1.textContent = fmtTC(c.start) + " +" + c.dur.toFixed(1);
+    const td2 = document.createElement("td");
+    const im = mk("img"); im.src = "/api/pipe/thumb?id=" + c.item_id; im.loading = "lazy";
+    td2.appendChild(im);
+    const td3 = document.createElement("td"); td3.textContent = c.text;
+    const td4 = document.createElement("td");
+    (c.tags||[]).slice(0,4).forEach(t=> td4.appendChild(mk("span","tag",t)));
+    const td5 = document.createElement("td");
+    const b = mk("button","g sm","换一个");
+    b.onclick = async ()=>{
+      b.disabled = true;
+      const r = await api("/api/pipe/swap", {pid:S.pid, idx:S.idx, clip:i});
+      b.disabled = false;
+      if(r.error){ toast(r.error); return; }
+      await reloadProject(); renderShots();
+    };
+    td5.appendChild(b);
+    [td0,td1,td2,td3,td4,td5].forEach(td=> tr.appendChild(td));
+    body.appendChild(tr);
+  });
+  tb.appendChild(body);
+  wrap.appendChild(tb);
+}
+
+/* ---------- ⑤ 合成 ---------- */
+$("#btn-compose").onclick = async ()=>{
+  const s = curScript(); if(!s){ toast("先生成脚本"); return; }
+  if(!s.plan){ toast("先对齐"); go(4); return; }
+  $("#btn-compose").disabled = true;
+  const r = await api("/api/pipe/compose", {pid:S.pid, idx:S.idx});
+  if(r.error){ toast(r.error); $("#btn-compose").disabled = false; return; }
+  const j = await pollJob(r.job, j=>{ bar($("#cmp-bar"), j.progress||0); $("#cmp-msg").textContent = j.message||""; });
+  $("#cmp-bar").style.display = "none";
+  $("#btn-compose").disabled = false;
+  $("#cmp-msg").textContent = j.state === "error" ? ("失败：" + j.error) : j.message;
+  if(j.state === "done" && j.result){
+    S.lastOut = j.result;
+    localStorage.setItem("pipe_out", JSON.stringify(j.result));
+    renderOut(); toast("合成完成");
+  }
+};
+/* ---------- 批量出片 ---------- */
+S.bmSel = new Set();
+
+function openBatch(){
+  if(!S.project || !(S.project.scripts||[]).length){ toast("先在第 2 步生成脚本"); return; }
+  S.bmSel = new Set(S.project.scripts.map((_,i)=>i));
+  $("#bm-msg").textContent = "";
+  $("#bm-out").innerHTML = "";
+  $("#bm-bar").style.display = "none";
+  $("#bm-go").disabled = false;
+  renderBmList();
+  $("#bm").classList.add("on");
+}
+function bmCount(){
+  const n = S.bmSel.size, v = +$("#bm-var").value || 1;
+  $("#bm-msg").textContent = "选了 " + n + " 条脚本，将出 " + (n * v) + " 条成片";
+}
+function renderBmList(){
+  const sc = S.project.scripts, box = $("#bm-list"); box.innerHTML = "";
+  $("#bm-sub").textContent = "共 " + sc.length + " 条脚本";
+  sc.forEach((s,i)=>{
+    const on = S.bmSel.has(i);
+    const row = mk("label", "bmrow" + (on ? " on" : ""));
+    const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = on;
+    cb.onchange = ()=>{
+      cb.checked ? S.bmSel.add(i) : S.bmSel.delete(i);
+      row.classList.toggle("on", cb.checked); bmCount();
+    };
+    row.appendChild(cb);
+    row.appendChild(mk("span","ttl", (i+1) + ". " + (s.angle_label || ANGLE_LABEL[s.angle] || "脚本")));
+    row.appendChild(mk("span","chip", ((s.sentences||[]).length) + " 句"));
+    row.appendChild(s.tts ? mk("span","chip on","已配音") : mk("span","chip","未配音"));
+    if(s.plan) row.appendChild(mk("span","chip","已分镜"));
+    if((s.outs||[]).length) row.appendChild(mk("span","chip on","出过 " + s.outs.length + " 条"));
+    box.appendChild(row);
+  });
+  bmCount();
+}
+$("#bm-all").onclick = ()=>{ S.bmSel = new Set(S.project.scripts.map((_,i)=>i)); renderBmList(); };
+$("#bm-none").onclick = ()=>{ S.bmSel.clear(); renderBmList(); };
+$("#bm-ready").onclick = ()=>{
+  S.bmSel = new Set((S.project.scripts||[]).map((s,i)=>i).filter(i=>!((S.project.scripts[i].outs||[]).length)));
+  renderBmList();
+};
+$("#bm-var").onchange = bmCount;
+$("#bm-close").onclick = ()=> $("#bm").classList.remove("on");
+$("#bm").onclick = e=>{ if(e.target.id === "bm") $("#bm").classList.remove("on"); };
+$("#btn-batch").onclick = openBatch;
+$("#btn-batch2").onclick = openBatch;
+
+$("#bm-go").onclick = async ()=>{
+  const idxs = [...S.bmSel].sort((a,b)=>a-b);
+  if(!idxs.length){ toast("至少选一条脚本"); return; }
+  if(!S.pid){ toast("项目丢了，刷新页面重试"); return; }
+  const variants = +$("#bm-var").value || 1;
+  const total = idxs.length * variants;
+  const mins = Math.max(1, Math.ceil(total * 10 / 60));
+  if(!confirm("开始批量出片？\n\n" + idxs.length + " 条脚本 × 每脚本 " + variants + " 版 = " + total + " 条成片\n" +
+              "预计 " + mins + " 分钟左右（本机渲染，可以挂着去做别的）\n\n" +
+              "配音：" + ($("#bm-tts").value === "1" ? "全部重做" : "缺的才补") + "\n" +
+              "分镜：" + ($("#bm-align").value === "1" ? "每版重新随机" : "保留已调好的"))) return;
+  $("#bm-go").disabled = true;
+  $("#bm-out").innerHTML = "";
+  $("#bm-msg").textContent = "提交中…";
+  const r = await api("/api/pipe/batch", {
+    pid:S.pid, idxs, variants,
+    redo_tts: $("#bm-tts").value === "1",
+    realign: $("#bm-align").value === "1"
+  });
+  if(r.error){ toast(r.error); $("#bm-go").disabled = false; $("#bm-msg").textContent = ""; return; }
+  $("#bm-bar").style.display = "block";
+  const j = await pollJob(r.job, j=>{
+    bar($("#bm-bar"), j.progress || 0);
+    $("#bm-msg").textContent = (j.message || "") + "　" + (j.done||0) + "/" + (j.total||total);
+  });
+  $("#bm-go").disabled = false;
+  const b = j.batch || {};
+  if(j.state === "error" && !(j.results||[]).length){
+    $("#bm-msg").textContent = "失败：" + (j.error || "未知原因");
+    return;
+  }
+  $("#bm-msg").textContent = (j.message || "完成") + (b.failed ? "　" + b.failed + " 条失败" : "");
+  renderBmResults(j.results || [], b);
+  await reloadProject();
+  renderScripts();
+  if(S.step === 4) renderShots();
+};
+
+function renderBmResults(list, b){
+  const box = $("#bm-out"); box.innerHTML = "";
+  if(!list.length) return;
+  box.appendChild(mk("div","hintline","本次出片 " + list.length + " 条，点「播放」直接看，或去第 5 步"));
+  list.forEach(x=>{
+    const row = mk("div","bmres");
+    row.appendChild(mk("span","nm", (x.angle||"") + (x.variant ? " V" + x.variant : "") + "　" + (x.name||"")));
+    row.appendChild(mk("span","chip", fmtDur(x.dur||0)));
+    row.appendChild(mk("span","chip", ((x.size||0)/1048576).toFixed(1) + "MB"));
+    const pb = mk("button","g sm","播放");
+    pb.onclick = ()=>{
+      S.lastOut = { name:x.name, out:x.out, dur:x.dur, size:x.size, clips:x.clips, bgm:x.bgm };
+      localStorage.setItem("pipe_out", JSON.stringify(S.lastOut));
+      $("#bm").classList.remove("on");
+      go(5);
+    };
+    row.appendChild(pb);
+    box.appendChild(row);
+  });
+  if((b.failures||[]).length){
+    const w = mk("div","note bad");
+    w.textContent = "失败 " + b.failures.length + " 条：" +
+      b.failures.slice(0,4).map(f=>f.angle + " V" + f.variant + " " + f.stage + "：" + f.error).join("；");
+    box.appendChild(w);
+  }
+}
+
+/* ---------- ⑤ 背景音乐 ---------- */
+S.bgmItems = [];
+function updateBgmAudio(){
+  const val = $("#bgm-sel").value || "";
+  const a = $("#bgm-audio");
+  if(!val || val.indexOf("__") === 0){ a.pause(); a.removeAttribute("src"); a.load(); return; }
+  a.src = "/api/pipe/bgm/audio?path=" + encodeURIComponent(val);
+}
+async function saveBgmLive(){
+  const val = $("#bgm-sel").value || "__none__";
+  const mode = val === "__none__" ? "none" : (val === "__random__" ? "random" : "one");
+  const video = {
+    bgm: mode === "one" ? val : "",
+    bgm_mode: mode,
+    bgm_volume: +$("#bgm-vol").value,
+    bgm_fade: +$("#bgm-fade").value
+  };
+  const r = await api("/api/pipe/config", {video});
+  if(r && r.ok && S.cfg && S.cfg.video) Object.assign(S.cfg.video, video);
+}
+async function loadBgm(){
+  let r;
+  try{ r = await api("/api/pipe/bgm/list"); }catch(e){ r = {items:[], dirs:[]}; }
+  S.bgmItems = r.items || [];
+  const v = (S.cfg && S.cfg.video) || {};
+  const sel = $("#bgm-sel"); sel.innerHTML = "";
+  const oNone = mk("option", null, "不要 BGM"); oNone.value = "__none__";
+  const oRnd = mk("option", null, "随机一首（每条成片不一样）"); oRnd.value = "__random__";
+  sel.appendChild(oNone); sel.appendChild(oRnd);
+  S.bgmItems.forEach(t=>{
+    const o = mk("option", null, t.name + (t.dur ? "  " + fmtDur(t.dur) : ""));
+    o.value = t.path; sel.appendChild(o);
+  });
+  const mode = v.bgm_mode || "one";
+  let pick;
+  if(mode === "random") pick = "__random__";
+  else if(mode === "none") pick = "__none__";
+  else if(v.bgm && S.bgmItems.some(x=>x.path === v.bgm)) pick = v.bgm;
+  else pick = S.bgmItems.length ? S.bgmItems[0].path : "__none__";
+  sel.value = pick;
+
+  const vol = (v.bgm_volume != null) ? +v.bgm_volume : 0.1;
+  $("#bgm-vol").value = vol;
+  $("#bgm-vol-v").textContent = vol.toFixed(2);
+  const fade = String((v.bgm_fade != null) ? +v.bgm_fade : 0.8);
+  $("#bgm-fade").value = [...$("#bgm-fade").options].some(o=>o.value === fade) ? fade : "0.8";
+
+  const dirs = r.dirs || [];
+  const box = $("#bgm-dirs"); box.innerHTML = "";
+  dirs.forEach(d=>{
+    const c = mk("span", null, d.length > 34 ? "📁 …" + d.slice(-32) : "📁 " + d);
+    c.title = d;
+    c.style.cssText = "display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border:1px solid var(--line-2);" +
+                      "border-radius:999px;font-size:11.5px;color:var(--muted);background:#fff;cursor:default";
+    const x = mk("button", "x", "×"); x.title = "从音乐库移除";
+    x.style.cssText = "position:static;opacity:1;width:15px;height:15px;line-height:13px;margin:0;font-size:12px;padding:0;border:0;border-radius:50%;background:rgba(0,0,0,.45);color:#fff;cursor:pointer";
+    x.onclick = async ()=>{
+      const rest = ((S.cfg.video.bgm_dirs) || []).filter(p=>p !== d);
+      await api("/api/pipe/config", {video:{bgm_dirs: rest}});
+      S.cfg.video.bgm_dirs = rest;
+      loadBgm();
+    };
+    c.appendChild(x); box.appendChild(c);
+  });
+
+  let msg;
+  if(!dirs.length) msg = "还没加音乐文件夹——点「加音乐文件夹」，选一个放 BGM 的目录（支持 mp3 / m4a / wav / flac / ogg / aac）";
+  else if(!S.bgmItems.length) msg = "目录里没找到音频文件，换一个目录试试";
+  else msg = "音乐库 " + S.bgmItems.length + " 首" + (mode === "random" ? "；合成时每条随机挑一首" : "");
+  if(r.bad && r.bad.length) msg += "；找不到的目录：" + r.bad.join("、");
+  $("#bgm-msg").textContent = msg;
+  updateBgmAudio();
+}
+$("#bgm-sel").onchange = ()=>{ updateBgmAudio(); saveBgmLive(); };
+$("#bgm-vol").oninput = ()=>{ $("#bgm-vol-v").textContent = (+$("#bgm-vol").value).toFixed(2); };
+$("#bgm-vol").onchange = ()=> saveBgmLive();
+$("#bgm-fade").onchange = ()=> saveBgmLive();
+$("#btn-bgm-refresh").onclick = ()=> loadBgm();
+$("#btn-bgm-play").onclick = ()=>{
+  const a = $("#bgm-audio");
+  if(!a.getAttribute("src")){ toast("先选一首 BGM"); return; }
+  if(a.paused) a.play().catch(()=>toast("浏览器不允许播放，点播放器上的按钮试试")); else a.pause();
+};
+$("#btn-bgm-add").onclick = async ()=>{
+  const r = await api("/api/pipe/dialog", {});
+  if(r.state !== "ok"){ if(r.message) toast(r.message); return; }
+  const dirs = ((S.cfg && S.cfg.video && S.cfg.video.bgm_dirs) || []).slice();
+  if(!dirs.includes(r.path)) dirs.push(r.path);
+  const res = await api("/api/pipe/config", {video:{bgm_dirs: dirs}});
+  if(res.error){ toast(res.error); return; }
+  if(S.cfg && S.cfg.video) S.cfg.video.bgm_dirs = dirs;
+  await loadBgm();
+  toast("已加入音乐库");
+};
+
+/* ---------- 成片：播放器 + 列表 ---------- */
+function parseOutName(n){
+  // 文件名格式：品牌_角度[_V1]_MMDD_HHMMSS.mp4，分步剥，别用一个大正则
+  let base = String(n).replace(/\.mp4$/i, "");
+  let when = "";
+  let m = base.match(/_(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})$/);
+  if(m){
+    when = (+m[1]) + "-" + m[2] + " " + m[3] + ":" + m[4];
+    base = base.slice(0, m.index);
+  }
+  let ver = "";
+  m = base.match(/_V(\d+)$/i);
+  if(m){ ver = "V" + m[1]; base = base.slice(0, m.index); }
+  const i = base.lastIndexOf("_");
+  return {
+    brand: i > 0 ? base.slice(0, i) : base,
+    angle: i > 0 ? base.slice(i + 1) : "",
+    ver, when
+  };
+}
+function fmtSize(b){ b = b || 0; return b > 1073741824 ? (b/1073741824).toFixed(2)+"GB" : (b/1048576).toFixed(1)+"MB"; }
+function fmtKbps(k){
+  k = Number(k) || 0;
+  if(!k) return "—";
+  return k >= 1000 ? (k/1000).toFixed(1) + "M" : k + "k";
+}
+function fmtKbpsFull(k){
+  k = Number(k) || 0;
+  if(!k) return "没有记录（老成片算不出时长）";
+  return k + " kbps（" + (k/1000).toFixed(2) + " Mbps，含音频）";
+}
+
+/* 列表排序：点表头切换字段，再点一次反向 */
+function outSortVal(it, k){
+  const p = it._p || (it._p = parseOutName(it.name));
+  switch(k){
+    case "name":  return (p.brand + p.angle).toLowerCase();
+    case "angle": return (p.angle || "").toLowerCase();
+    case "ver":   return p.ver ? (parseInt(p.ver.slice(1), 10) || 0) : 0;
+    case "dur":   return Number(it.dur) || 0;
+    case "size":  return Number(it.size) || 0;
+    case "kbps":  return Number(it.kbps) || 0;
+    case "clips": return Number(it.clips) || 0;
+    case "mtime": return Number(it.mtime) || 0;
+  }
+  return 0;
+}
+function outSorted(){
+  const key = S.outSort.key, dir = S.outSort.dir;
+  const arr = S.outs.slice();
+  arr.sort((a, b)=>{
+    const x = outSortVal(a, key), y = outSortVal(b, key);
+    let r = (typeof x === "string" || typeof y === "string")
+      ? String(x).localeCompare(String(y), "zh-CN", {numeric:true})
+      : x - y;
+    if(r === 0) r = (Number(a.mtime) || 0) - (Number(b.mtime) || 0);   // 同值时新的在前
+    return r * dir;
+  });
+  return arr;
+}
+function renderOlHead(){
+  $$("#outlist-card th.srt").forEach(th=>{
+    const on = th.dataset.k === S.outSort.key;
+    th.classList.toggle("on", on);
+    const a = th.querySelector(".arr");
+    if(a) a.textContent = on ? (S.outSort.dir < 0 ? "▼" : "▲") : "";
+  });
+}
+function fmtWhen(ts){
+  if(!ts) return "";
+  const d = new Date(ts*1000), p = v=>String(v).padStart(2,"0");
+  return (d.getMonth()+1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+}
+
+async function renderOut(){
+  const saved = S.lastOut || JSON.parse(localStorage.getItem("pipe_out") || "null");
+  const rec = await api("/api/pipe/outputs");
+  const items = rec.items || [];
+  S.outs = items;
+  const names = new Set(items.map(x=>x.name));
+  [...S.outSel].forEach(n=>{ if(!names.has(n)) S.outSel.delete(n); });   // 删掉的从选中里剔掉
+
+  if(!items.length){
+    $("#out-card").hidden = true;
+    $("#outlist-card").hidden = true;
+    return;
+  }
+  const curName = (saved && saved.name && names.has(saved.name)) ? saved.name : items[0].name;
+  const cur = items.find(x=>x.name === curName) || items[0];
+  S.lastOut = { name: cur.name };                 // 只记文件名，其余实时从记录取
+  localStorage.setItem("pipe_out", JSON.stringify({ name: cur.name }));
+
+  $("#out-card").hidden = false;
+  $("#o-dur").textContent = cur.dur ? fmtDur(cur.dur) : "-";
+  $("#o-size").textContent = fmtSize(cur.size);
+  $("#o-kbps").textContent = fmtKbps(cur.kbps);
+  $("#o-kbps").parentElement.title = fmtKbpsFull(cur.kbps);
+  $("#o-clips").textContent = cur.clips || "-";
+  $("#o-name").textContent = cur.name + (cur.bgm ? "　BGM：" + cur.bgm : "");
+
+  const v = $("#out-video");
+  if(v.dataset.cur !== cur.name){                 // 同一条别重设 src，否则会打断播放
+    v.src = "/api/pipe/out?name=" + encodeURIComponent(cur.name) + "&t=" + Date.now();
+    v.dataset.cur = cur.name;
+  }
+  const dl = "/api/pipe/out?name=" + encodeURIComponent(cur.name);
+  $("#btn-dl").href = dl;
+  $("#btn-dl").setAttribute("download", cur.name);
+  $("#btn-outdir").onclick = ()=> api("/api/openfolder", {path:cur.out.replace(/[\\/][^\\/]+$/, "")}).then(r=>{
+    if(r.error) toast(r.error, 4000);
+  });
+  $("#btn-csv").onclick = ()=>{
+    if(!cur.shots_csv){ toast("这一条没有分镜表记录（是之前渲染的）"); return; }
+    api("/api/openfolder", {path:cur.shots_csv}).then(r=>{ if(r.error) toast(r.error, 4000); });
+  };
+  $("#btn-outdel").onclick = async ()=>{
+    if(await delOne(cur.name, !!cur.shots_csv, true)) renderOut();
+  };
+  renderOutList(cur.name);
+}
+
+async function delOne(name, withMid, ask){
+  if(ask){
+    const tip = withMid ? "会一起删掉：分镜表 CSV、字幕 ASS、这条的配音、项目记录"
+                        : "这条没有中间文件记录，只删成片和同名 json";
+    if(!confirm("删除「" + name + "」？\n" + tip + "\n\n会移到 Windows 回收站，删错了可以从回收站还原。")) return false;
+  }
+  const r = await api("/api/pipe/output/delete", {name});
+  if(r.error){ toast(r.error, 4500); return false; }
+  if(r.failed && r.failed.length){
+    toast("已移入回收站 " + r.count + " 项（" + fmtSize(r.size) + "），还有 " + r.failed.length +
+          " 项没删掉（多半被占用）：" + r.failed[0], 7000);
+  }else if(ask){
+    toast("已移入回收站：" + r.count + " 项，共 " + fmtSize(r.size));
+  }
+  if(S.lastOut && S.lastOut.name === name){ S.lastOut = null; localStorage.removeItem("pipe_out"); }
+  try{
+    const vd = $("#out-video");
+    if(vd.dataset.cur === name){ vd.pause(); vd.removeAttribute("src"); vd.dataset.cur = ""; vd.load(); }
+  }catch(e){}
+  return true;
+}
+
+function pickOut(name){
+  S.lastOut = { name };
+  localStorage.setItem("pipe_out", JSON.stringify({ name }));
+  renderOut();
+}
+
+function renderOutList(curName){
+  $("#outlist-card").hidden = false;
+  const items = outSorted();
+  const body = $("#ol-body");
+  body.innerHTML = "";
+  const total = items.reduce((a,b)=>a+(b.size||0),0);
+  const ksum = items.reduce((a,b)=>a+(Number(b.kbps)||0),0);
+  const kavg = items.length ? Math.round(ksum / items.length) : 0;
+  $("#ol-sum").textContent = items.length + " 条 · 共 " + fmtSize(total) + (kavg ? " · 均值 " + fmtKbps(kavg) : "");
+  renderOlHead();
+
+  items.forEach(it=>{
+    const tr = mk("tr");
+    if(it.name === curName) tr.classList.add("cur");
+    if(S.outSel.has(it.name)) tr.classList.add("sel");
+
+    const ck = mk("input"); ck.type = "checkbox"; ck.checked = S.outSel.has(it.name);
+    ck.onchange = ()=>{
+      if(ck.checked) S.outSel.add(it.name); else S.outSel.delete(it.name);
+      tr.classList.toggle("sel", ck.checked);
+      updateOlCnt();
+    };
+    const td0 = mk("td","ck"); td0.appendChild(ck); tr.appendChild(td0);
+
+    const p = parseOutName(it.name);
+    const nm = mk("div","nm", it.name.replace(/\.mp4$/i, ""));
+    nm.title = "点一下在上面播放　" + it.name;
+    nm.onclick = ()=> pickOut(it.name);
+    const td1 = mk("td"); td1.appendChild(nm); tr.appendChild(td1);
+
+    const ang = mk("td");
+    if(p.angle){ ang.appendChild(mk("span","ang",p.angle)); }
+    else{ ang.textContent = "—"; }
+    tr.appendChild(ang);
+
+    tr.appendChild(mk("td","ver", p.ver || "—"));
+    tr.appendChild(mk("td", null, it.dur ? fmtDur(it.dur) : "—"));
+    tr.appendChild(mk("td", null, fmtSize(it.size)));
+    const kb = mk("td","kb", fmtKbps(it.kbps));
+    kb.title = fmtKbpsFull(it.kbps);
+    if(Number(it.kbps) >= 4000) kb.classList.add("hi");   // 高码率标一下，方便挑出体积大的
+    tr.appendChild(kb);
+    tr.appendChild(mk("td", null, it.clips || "—"));
+
+    const when = p.when || (it.mtime ? fmtWhen(it.mtime) : "");
+    tr.appendChild(mk("td","tc", when));
+
+    const act = mk("td"); const box = mk("div","act");
+    const bPlay = mk("button", null, "播放");
+    bPlay.onclick = ()=> pickOut(it.name);
+    const bDl = mk("button","dl","下载");
+    bDl.onclick = ()=>{
+      const a = mk("a"); a.href = "/api/pipe/out?name=" + encodeURIComponent(it.name);
+      a.download = it.name; document.body.appendChild(a); a.click(); a.remove();
+    };
+    const bDel = mk("button","del","删");
+    bDel.title = "删除这条（进回收站）";
+    bDel.onclick = async ()=>{
+      if(await delOne(it.name, !!it.shots_csv, true)) renderOut();
+    };
+    box.appendChild(bPlay); box.appendChild(bDl); box.appendChild(bDel);
+    act.appendChild(box); tr.appendChild(act);
+
+    body.appendChild(tr);
+  });
+  updateOlCnt();
+}
+
+function updateOlCnt(){
+  const n = S.outSel.size, all = S.outs.length;
+  $("#ol-cnt").textContent = "已选 " + n + " / " + all + " 条";
+  $("#btn-ol-dl").disabled = n === 0;
+  $("#btn-ol-del").disabled = n === 0;
+  // 勾选后底部浮出批量操作条，列表滚多远都能点到
+  const sz = S.outs.reduce((a,b)=> a + (S.outSel.has(b.name) ? (b.size || 0) : 0), 0);
+  $("#olfab-n").textContent = "已选 " + n + " 条";
+  $("#olfab-sz").textContent = n ? ("共 " + fmtSize(sz)) : "";
+  const show = n > 0 && !$("#outlist-card").hidden;
+  $("#ol-fab").classList.toggle("on", show);
+  document.body.classList.toggle("has-fab", show);
+}
+
+const DOWN_TIP = "本地服务已停止：双击目录里的 serve.bat（或 start.bat）重新启动，再刷新页面";
+function isDown(msg){ return /连不上|Failed to fetch|NetworkError|Load failed/i.test(String(msg || "")); }
+
+async function zipSel(btn, msgEl, barEl){
+  const names = [...S.outSel];
+  if(!names.length){ toast("先在列表里勾选要下载的成片"); return false; }
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = "打包中…";
+  if(msgEl) msgEl.textContent = "正在打包 " + names.length + " 条…";
+  if(barEl){ barEl.style.display = "block"; bar(barEl, 0.35); }
+  const t0 = Date.now();
+  const r = await api("/api/pipe/output/zip", {names});
+  if(barEl) barEl.style.display = "none";
+  btn.disabled = false; btn.textContent = label;
+  if(r.error){
+    if(msgEl) msgEl.textContent = "";
+    toast(isDown(r.error) ? DOWN_TIP : ("打包失败：" + r.error), 6500);
+    return false;
+  }
+  const a = mk("a"); a.href = r.url; a.download = r.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  if(msgEl) msgEl.textContent = "已打包 " + r.count + " 条 · " + fmtSize(r.zip_size) + "（用时 " + ((Date.now()-t0)/1000).toFixed(1) + "s）";
+  toast("开始下载：" + r.name);
+  return true;
+}
+
+async function delSel(btn, msgEl, barEl){
+  const names = [...S.outSel];
+  if(!names.length){ toast("先在列表里勾选要删的成片"); return false; }
+  if(!confirm("删除选中的 " + names.length + " 条成片？\n\n每条会一起删掉它的分镜表、字幕、配音；原始素材视频不动。\n全部移到 Windows 回收站，可以还原。")) return false;
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = "删除中…";
+  let ok = 0, fail = 0;
+  for(let i=0;i<names.length;i++){
+    if(msgEl) msgEl.textContent = "删除中 " + (i+1) + "/" + names.length;
+    if(barEl){ barEl.style.display = "block"; bar(barEl, (i+1)/names.length); }
+    const r = await api("/api/pipe/output/delete", {name:names[i]});
+    if(r.error || (r.failed && r.failed.length)) fail++; else ok++;
+    S.outSel.delete(names[i]);
+  }
+  if(barEl) barEl.style.display = "none";
+  btn.disabled = false; btn.textContent = label;
+  if(msgEl) msgEl.textContent = "已删 " + ok + " 条" + (fail ? "，" + fail + " 条没删掉" : "");
+  toast(fail ? ("删完 " + ok + " 条，" + fail + " 条失败（可能被占用）") : ("已移入回收站 " + ok + " 条"), fail ? 6000 : 3000);
+  renderOut();
+  return ok > 0;
+}
+
+$$("#outlist-card th.srt").forEach(th=>{
+  th.onclick = ()=>{
+    const k = th.dataset.k;
+    if(S.outSort.key === k) S.outSort.dir = -S.outSort.dir;
+    else S.outSort = {key:k, dir:(k === "name" || k === "angle") ? 1 : -1};   // 文字升序，数字默认从大到小
+    try{ localStorage.setItem("pipe_outsort", JSON.stringify(S.outSort)); }catch(e){}
+    renderOutList((S.lastOut && S.lastOut.name) || "");
+  };
+});
+
+$("#btn-ol-all").onclick = ()=>{
+  S.outs.forEach(x=> S.outSel.add(x.name));
+  renderOutList((S.lastOut && S.lastOut.name) || "");
+};
+$("#btn-ol-none").onclick = ()=>{
+  S.outSel.clear();
+  renderOutList((S.lastOut && S.lastOut.name) || "");
+};
+$("#btn-ol-dir").onclick = ()=>{
+  const base = (S.outs[0] && S.outs[0].out) || "";
+  if(!base){ toast("还没有成片"); return; }
+  api("/api/openfolder", {path: base.replace(/[\\/][^\\/]+$/, "")}).then(r=>{ if(r.error) toast(r.error, 4000); });
+};
+
+$("#btn-ol-dl").onclick = ()=> zipSel($("#btn-ol-dl"), $("#ol-msg"), $("#ol-bar"));
+$("#btn-ol-del").onclick = ()=> delSel($("#btn-ol-del"), $("#ol-msg"), $("#ol-bar"));
+
+/* 底部浮动操作条 */
+$("#olfab-dl").onclick = ()=> zipSel($("#olfab-dl"), null, $("#ol-bar"));
+$("#olfab-del").onclick = ()=> delSel($("#olfab-del"), null, $("#ol-bar"));
+$("#olfab-clear").onclick = ()=>{
+  S.outSel.clear();
+  renderOutList((S.lastOut && S.lastOut.name) || "");
+};
+
+/* ---------- 启动 ---------- */
+async function boot(){
+  renderSteps(); renderNav(S.step);
+  try{                                            // 记住上次的排序方式
+    const os = JSON.parse(localStorage.getItem("pipe_outsort") || "null");
+    if(os && os.key && typeof os.dir === "number") S.outSort = {key:os.key, dir:os.dir};
+  }catch(e){}
+  await loadAngles();
+  $("#folder").value = localStorage.getItem("pipe_folders") || "";
+  refreshFolCnt();
+  await loadCfg();
+  const qs = new URLSearchParams(location.search);
+  if(qs.get("pid")) localStorage.setItem("pipe_pid", qs.get("pid"));
+  const pid0 = localStorage.getItem("pipe_pid");
+  if(pid0){
+    const r = await api("/api/pipe/project?id=" + pid0);
+    if(r.project){
+      S.pid = pid0; S.project = r.project; S.idx = r.project.active||0;
+      const pr = r.project.product || {};
+      $("#p-name").value = pr.name||""; $("#p-aud").value = pr.audience||"";
+      $("#p-points").value = Array.isArray(pr.points) ? pr.points.join("\n") : (pr.points||"");
+      $("#p-pain").value = pr.pain||""; $("#p-price").value = pr.price||""; $("#p-proof").value = pr.proof||"";
+      if(r.project.scripts && r.project.scripts.length) $("#scripts-card").hidden = false;
+    }else if(r.error === "项目不存在"){
+      // 项目记录被清掉了（老版本删成片会连带删 project.json）：先看浏览器里还有没有备份
+      const bak = loadProjCache();
+      if(bak && bak.id === pid0 && (bak.scripts || []).length){
+        S.project = bak; S.pid = null;
+        const np = await rebuildProject();
+        if(np){
+          S.idx = Math.min(bak.active || 0, (np.scripts||[]).length - 1);
+          const pr = np.product || {};
+          $("#p-name").value = pr.name || "";
+          $("#p-aud").value = pr.audience || "";
+          $("#p-points").value = Array.isArray(pr.points) ? pr.points.join("\n") : (pr.points||"");
+          $("#p-pain").value = pr.pain || ""; $("#p-price").value = pr.price || ""; $("#p-proof").value = pr.proof || "";
+          $("#scripts-card").hidden = false;
+          toast("上次的项目记录丢了，已用本地缓存恢复（脚本 " + (np.scripts||[]).length + " 条）", 6500);
+        }
+      }else{
+        localStorage.removeItem("pipe_pid");
+        toast("上次的项目记录已经不在了，重新生成一次脚本就行（素材和打标都还在）", 6500);
+      }
+    }
+  }
+  await loadPool();
+  // 已检测的视频列表
+  try{
+    const vids = await api("/api/pipe/videos");
+    const sel = $("#vids"); sel.innerHTML = "";
+    (vids.videos||[]).forEach(v=>{
+      const o = mk("option", null, v.name + "（" + (v.scenes||0) + " 镜头）"); o.value = v.token; sel.appendChild(o);
+    });
+    if(!(vids.videos||[]).length) sel.innerHTML = "<option value=''>（先在切割器里检测视频）</option>";
+  }catch(e){}
+  renderOut();
+  if(qs.get("cfg")){ $("#modal").classList.add("on"); refreshLstat(); }
+  const want = parseInt(qs.get("step") || "0", 10);
+  if(want >= 1 && want <= 5) go(want);
+  else if(S.pid && S.project && (S.project.scripts||[]).length) go(2);
+  else go(1);
+}
+$("#btn-cfg").onclick = ()=>{ $("#modal").classList.add("on"); refreshLstat(); };
+$("#btn-close").onclick = ()=> $("#modal").classList.remove("on");
+$("#modal").onclick = e=> { if(e.target.id === "modal") $("#modal").classList.remove("on"); };
+$("#btn-savecfg").onclick = saveCfg;
+$("#btn-test").onclick = async ()=>{
+  $("#test-msg").textContent = "测试中…";
+  await saveCfg2();
+  const r = await api("/api/pipe/testllm", {});
+  $("#test-msg").textContent = r.ok ? ("通：" + (r.reply||"").slice(0,40)) : ("失败：" + r.error);
+};
+$("#btn-llmscan").onclick = async ()=>{
+  const msg = $("#llmscan-msg"), box = $("#scan-list");
+  msg.textContent = "扫描中…（约 3 秒）"; box.innerHTML = "";
+  const r = await api("/api/pipe/llm/local");
+  const found = r.found || [];
+  if(!found.length){
+    msg.textContent = "没找到本地服务（llama-server / Ollama 起了吗？端口 9931 / 11434）";
+    return;
+  }
+  msg.textContent = "找到 " + found.length + " 个端点，点一下填入";
+  found.forEach(f=>{
+    f.models.forEach(m=>{
+      const b = mk("button", "g sm", f.label + " :" + f.port + " · " + shortModel(m.id) + (m.vision ? " · 可看图" : " · 纯文本"));
+      b.style.margin = "0 6px 6px 0";
+      b.onclick = ()=>{
+        $("#c-base").value = f.base_url;
+        $("#c-model").value = m.id;
+        if(!$("#c-key").value.trim()) $("#c-key").value = "sk-local";
+        msg.textContent = "已填入 " + f.base_url + "，点「保存」生效";
+        $("#test-msg").textContent = m.vision
+          ? "这个模型能看图，打标和写稿都用它，全免费"
+          : "纯文本模型：写稿免费，打标只用本地视觉特征";
+      };
+      box.appendChild(b);
+    });
+  });
+};
+async function saveCfg2(){
+  await api("/api/pipe/config", {llm: llmForm()});
+}
+$$("#presets button").forEach(b=>{
+  b.onclick = ()=>{
+    $$("#presets button").forEach(x=> x.classList.remove("on"));
+    b.classList.add("on");
+    S.cfg.video.w = +b.dataset.w; S.cfg.video.h = +b.dataset.h;
+  };
+});
+/* ---------- 本地模型启停 ---------- */
+let lPoll = null;
+async function refreshLstat(){
+  let r;
+  try{ r = await api("/api/pipe/llm/status"); }catch(e){ return null; }
+  const el = $("#lstat"), tail = $("#ltail");
+  if(!el || !r || r.error) return r;
+  if(r.ready){
+    el.textContent = "已就绪 · 端口 " + r.port + (r.model ? " · " + shortModel(r.model) : "")
+                   + (r.vision ? " · 能看图" : " · 只能读文字");
+    el.style.color = "var(--ok)";
+    tail.style.display = "none";
+    if(lPoll){ clearInterval(lPoll); lPoll = null; }
+    fillLocal(r);
+  }else if(r.alive){
+    el.textContent = "加载中 " + Math.round(r.elapsed) + "s（首次 30~60 秒，别关这个窗口）";
+    el.style.color = "var(--muted)";
+  }else if(r.exit !== undefined && r.exit !== null){
+    el.textContent = "启动失败（退出码 " + r.exit + "）";
+    el.style.color = "var(--bad)";
+    tail.style.display = "block";
+    tail.textContent = r.tail || "";
+    if(lPoll){ clearInterval(lPoll); lPoll = null; }
+  }else{
+    el.textContent = r.found
+      ? ("未运行 · 将加载 " + shortModel(r.model || "")
+         + (r.vision ? "（含视觉，打标也能用）" : "（纯文本）") + "，点左边按钮启动")
+      : "未运行 · 没找到 llama-server，展开下面填目录";
+    el.style.color = "var(--muted)";
+  }
+  return r;
+}
+function fillLocal(r){
+  const base = $("#c-base").value.trim();
+  const isLocalBase = !base || /127\.0\.0\.1|localhost/i.test(base);
+  if(!isLocalBase) return;            // 用户配了云端地址就别乱改
+  if(!base) $("#c-base").value = "http://127.0.0.1:" + r.port;
+  if(!$("#c-model").value.trim() && r.models && r.models.length){
+    $("#c-model").value = r.models[0].id;
+  }
+}
+function startPoll(){
+  if(lPoll) clearInterval(lPoll);
+  lPoll = setInterval(refreshLstat, 1200);
+}
+$("#btn-lstart").onclick = async ()=>{
+  const el = $("#lstat");
+  el.textContent = "启动中…"; el.style.color = "var(--muted)";
+  $("#ltail").style.display = "none";
+  await saveCfg2();                       // 先把目录/端口/参数存进去
+  const r = await api("/api/pipe/llm/start", {});
+  const fail = (msg)=>{ el.textContent = msg; el.style.color = "var(--bad)";
+    $("#ltail").style.display = "block"; $("#ltail").textContent = msg; };
+  if(r.error){ fail(r.error); return; }
+  if(r.already){ toast("本地模型本来就在跑"); refreshLstat(); return; }
+  if(r.state === "ready"){ toast("本地模型已就绪"); refreshLstat(); return; }
+  toast("正在加载模型，首次约 30~60 秒");
+  startPoll();
+};
+$("#btn-lstop").onclick = async ()=>{
+  $("#lstat").textContent = "停止中…";
+  const r = await api("/api/pipe/llm/stop", {});
+  toast(r.killed ? "已停止本地模型" : "没有在运行的本地模型");
+  if(lPoll){ clearInterval(lPoll); lPoll = null; }
+  refreshLstat();
+};
+
+boot();
+</script>
+</body>
+</html>
