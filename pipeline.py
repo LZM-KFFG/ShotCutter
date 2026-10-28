@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import base64
+import codecs
 import hashlib
 import json
 import os
@@ -52,6 +53,9 @@ _lock = threading.Lock()
 
 VIDEO_EXT = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".flv", ".ts", ".m4v", ".wmv", ".mpg", ".mpeg", ".m2ts"}
 
+# 去硬字幕用的本机工具（Video Subtitle Remover），可在 pipeline.json 的 desub.root 改
+DEFAULT_VSR = r"D:\Tools\VSR"
+
 EDGE_VOICES = [
     {"id": "zh-CN-XiaoxiaoNeural", "label": "晓晓 · 女 · 亲和自然", "gender": "女"},
     {"id": "zh-CN-XiaoyiNeural", "label": "晓伊 · 女 · 年轻活泼", "gender": "女"},
@@ -80,6 +84,8 @@ DEFAULT_CFG = {
         "bgm": "", "bgm_volume": 0.10,
         "bgm_dirs": [], "bgm_mode": "one", "bgm_fade": 0.8,
     },
+    # 去硬字幕：调用本机 VSR（D:\Tools\VSR）自带 Python 跑命令行模式
+    "desub": {"root": DEFAULT_VSR},
 }
 
 
@@ -198,6 +204,222 @@ def has_audio(path: str | Path) -> bool:
         return "Audio:" in ((r.stderr or "") + (r.stdout or ""))
     except Exception:
         return False
+
+
+# ---------------------------------------------------------------- 去硬字幕（VSR）
+
+DESUB_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".flv", ".m4v", ".wmv", ".ts"}
+
+
+def desub_root(cfg: dict | None = None) -> Path:
+    cfg = cfg or load_cfg()
+    raw = str((cfg.get("desub") or {}).get("root") or DEFAULT_VSR).strip().strip('"').strip("'")
+    return Path(raw)
+
+
+def desub_info(cfg: dict | None = None) -> dict:
+    """探测 VSR：自带 Python + resources/run_with_area.py 是否都在，顺带读它的算法与检测开关。"""
+    root = desub_root(cfg)
+    py = root / "Python" / "python.exe"
+    entry = root / "resources" / "run_with_area.py"
+    mode, detect = "", None
+    try:
+        txt = (root / "resources" / "backend" / "config.py").read_text(encoding="utf-8", errors="replace")
+        m = re.search(r"^MODE\s*=\s*InpaintMode\.(\w+)", txt, re.M)
+        mode = m.group(1) if m else ""
+        m2 = re.search(r"^STTN_SKIP_DETECTION\s*=\s*(\w+)", txt, re.M)
+        detect = (m2.group(1) == "False") if m2 else None
+    except Exception:
+        pass
+    return {
+        "ok": py.exists() and entry.exists(),
+        "root": str(root), "python": str(py), "entry": str(entry),
+        "mode": mode, "detect": detect,
+        "out_dir": str(PIPE / "desub"),
+    }
+
+
+def _is_desubbed(p: Path) -> bool:
+    return "_no_sub" in p.stem.lower()
+
+
+def desub_collect(folders: list | None = None, ids: list | None = None) -> list[str]:
+    """收集要去字幕的源片：选中的素材 + 文件夹里递归扫到的视频，都已处理过的跳过。"""
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def add(p: Path) -> None:
+        try:
+            rp = str(p.resolve())
+        except Exception:
+            rp = str(p)
+        if rp in seen or not p.is_file() or _is_desubbed(p):
+            return
+        seen.add(rp)
+        out.append(rp)
+
+    if ids:
+        want = set(ids)
+        for it in pool_list():
+            if it.get("id") in want:
+                add(Path(it["path"]))
+    for d in folders or []:
+        raw = str(d).strip().strip('"').strip("'")
+        root = Path(raw) if raw else None
+        if not root or not root.is_dir():
+            continue
+        for f in sorted(root.rglob("*")):
+            if f.is_file() and f.suffix.lower() in DESUB_EXTS:
+                add(f)
+    return out
+
+
+def _desub_index_path() -> Path:
+    return PIPE / "desub" / "index.json"
+
+
+def _desub_index() -> dict:
+    try:
+        return json.loads(_desub_index_path().read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _desub_save_index(idx: dict) -> None:
+    try:
+        _desub_index_path().parent.mkdir(parents=True, exist_ok=True)
+        _desub_index_path().write_text(json.dumps(idx, ensure_ascii=False, indent=1), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def desub_dst(src: Path, out_dir: Path, index: dict) -> Path:
+    """给源文件定一个稳定的输出名：同名冲突时拼上级目录，再冲突加序号；映射存 index.json，
+    这样同一个文件重跑还能认出自己，不会越跑越多。"""
+    key = str(src)
+    got = index.get(key)
+    if got and (out_dir / got).exists():
+        return out_dir / got
+    base = src.stem + "_no_sub"
+    used = {v for k, v in index.items() if k != key}
+    cands = [out_dir / (base + ".mp4"), out_dir / ("%s_%s.mp4" % (src.parent.name, base))]
+    for i in range(2, 50):
+        cands.append(out_dir / ("%s_%s_%d.mp4" % (src.parent.name, base, i)))
+    for c in cands:
+        if not c.exists() and c.name not in used:
+            index[key] = c.name
+            _desub_save_index(index)
+            return c
+    index[key] = cands[0].name
+    return cands[0]
+
+
+def _desub_one(src: Path, dst: Path, py: Path, cwd: Path, area, job: dict,
+               idx: int, total: int, detect: bool = True) -> Path:
+    """跑一个文件：VSR 只会写到源目录的 <名字>_no_sub.mp4，跑完再搬进 _work/pipe/desub。"""
+    arg = "none" if not area else "%d,%d,%d,%d" % tuple(area)
+    env = dict(os.environ)
+    env.update({"PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8",
+                "QPT_MODE": "Running", "QPT_COLOR": "False",
+                "VSR_ROOT": str(cwd.parent)})
+    proc = subprocess.Popen([str(py), str(ROOT / "vsr_runner.py"), str(src), arg, "1" if detect else "0"],
+                            cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            env=env, creationflags=NO_WINDOW)
+    dec = codecs.getincrementaldecoder("utf-8")("replace")
+    tail = ""
+    try:
+        while True:
+            chunk = proc.stdout.read(256)
+            if not chunk:
+                break
+            text = dec.decode(chunk)
+            got = re.findall(r"(\d{1,3})%\|", text)
+            if got:
+                pct = min(100, int(got[-1]))
+                job["progress"] = (idx + pct / 100.0) / max(1, total)
+                job["message"] = "[%d/%d] %s  %d%%" % (idx + 1, total, src.name, pct)
+            tail = re.sub(r"\s+", " ", (tail + " " + text))[-400:]
+    finally:
+        try:
+            proc.stdout.close()
+        except Exception:
+            pass
+    code = proc.wait()
+    if code != 0:
+        raise RuntimeError("VSR 退出码 %d：%s" % (code, tail[-140:] or "无输出"))
+    made = src.with_name(src.stem + "_no_sub" + src.suffix)
+    if not made.exists():
+        made = src.with_name(src.stem + "_no_sub.mp4")
+    if not made.exists():
+        raise RuntimeError("没等到输出文件（源目录里没有 %s_no_sub.mp4）" % src.stem)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if made.resolve() != dst.resolve():
+        if dst.exists():
+            dst.unlink(missing_ok=True)
+        shutil.move(str(made), str(dst))
+    return dst
+
+
+def desub_worker(videos, cfg: dict, job: dict, opts: dict | None = None) -> dict:
+    """批量去字幕。opts: mode=auto|box, box=[上,下,左,右] 百分比, add_pool, force。"""
+    opts = opts or {}
+    info = desub_info(cfg)
+    if not info["ok"]:
+        raise RuntimeError("没找到 VSR：%s（检查 pipeline.json 里的 desub.root）" % info["root"])
+    py, cwd = Path(info["python"]), Path(info["entry"]).parent
+    out_dir = PIPE / "desub"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    mode = str(opts.get("mode") or "auto").lower()
+    try:
+        box = [float(x) for x in (opts.get("box") or [72, 96, 2, 98])[:4]]
+    except Exception:
+        box = [72, 96, 2, 98]
+    add_pool = bool(opts.get("add_pool", True))
+    force = bool(opts.get("force"))
+
+    total = len(videos)
+    made = skipped = 0
+    failed: list[dict] = []
+    index = _desub_index()
+    base_detect = mode != "box"
+    for i, raw in enumerate(videos):
+        src = Path(raw)
+        dst = desub_dst(src, out_dir, index)
+        job["message"] = "[%d/%d] %s" % (i + 1, total, src.name)
+        if dst.exists() and not force:
+            skipped += 1
+            job["done"] = i + 1
+            job["progress"] = (i + 1) / max(1, total)
+            continue
+        area, det = None, base_detect
+        if mode == "box":
+            w, h = media_size(src)
+            if w and h:
+                area = (max(0, int(h * box[0] / 100)), min(h, int(h * box[1] / 100)),
+                        max(0, int(w * box[2] / 100)), min(w, int(w * box[3] / 100)))
+                if area[1] <= area[0] + 2 or area[3] <= area[2] + 2:
+                    area = None          # 比例填反了就退回自动检测，别硬画一条线
+        if area is None:
+            det = True                   # 没有可用区域就只能走逐帧检测
+        try:
+            got = _desub_one(src, dst, py, cwd, area, job, i, total, det)
+            made += 1
+            if add_pool:
+                d = media_duration(got)
+                if d > 0.05:
+                    add_clip(str(got), 0.0, d, name=got.name, src_kind="desub")
+            job["results"].append({"src": str(src), "out": str(got), "ok": True})
+        except Exception as exc:  # noqa: BLE001
+            failed.append({"src": str(src), "error": str(exc)})
+            job["results"].append({"src": str(src), "ok": False, "error": str(exc)})
+        job["done"] = i + 1
+        job["progress"] = (i + 1) / max(1, total)
+
+    job["message"] = "去字幕完成：新生成 %d，跳过 %d，失败 %d" % (made, skipped, len(failed))
+    if failed and not made and not skipped:
+        raise RuntimeError("全部失败：" + str(failed[0].get("error") or "")[:140])
+    return {"made": made, "skipped": skipped, "failed": failed}
 
 
 def _short(text: str, n: int = 220) -> str:

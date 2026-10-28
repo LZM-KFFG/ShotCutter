@@ -12,6 +12,7 @@
 | 环节 | 说明 |
 |---|---|
 | **切片** | `镜头切割器` 页（`/`）用 PySceneDetect 按镜头切分长视频，导出到源目录下的 `镜头切片/`；流水线第 1 步扫描这些片段（整段视频也能直接加，会当作一个镜头），支持多文件夹、递归扫描、指纹去重 |
+| **去硬字幕** | 调本机 VSR（默认 `D:\Tools\VSR`）把烧进画面的字幕抹掉再进池：可选「自动检测」逐帧找字幕，或「固定底部区域」整块重绘（快很多）；支持整文件夹批量，也能只处理勾选的素材 |
 | **打标** | 先用 OpenCV 算亮度 / 色调 / 饱和度 / 细节 / 动态等视觉特征；接了视觉大模型后再加「场景 / 主体 / 动作 / 景别 / 氛围」语义标签，分镜匹配会准很多 |
 | **脚本** | 内置 **14 种口播角度**（痛点切入、对比实测、参数硬核、避坑提醒、场景代入、亲身自述、算账划算、问答答疑、口碑回购、开箱第一眼、用法教程、送礼场景、时令当季、反常识），按商品信息生成带停顿与镜头提示的口播稿 |
 | **配音** | edge-tts 逐句合成（默认 `zh-CN-XiaoxiaoNeural`，语速 +8%），拿每句真实时长；断网可切 Windows SAPI 兜底 |
@@ -30,6 +31,7 @@
 - **Python 3.10+**（代码用了 `str | None` 这类新语法，开发和验证环境为 3.13）
 - **ffmpeg**：仓库不附带，见下面「安装」第 2 步
 - 可选：**llama.cpp** + 一个视觉模型（本地打标 / 本地写脚本，省钱且不联网）
+- 可选：**VSR**（Video Subtitle Remover，自带 Python + CUDA 版 torch）用于去硬字幕，默认路径 `D:\Tools\VSR`
 - 可选：能上外网（edge-tts 走微软在线接口；纯 SAPI 则不需要）
 
 ---
@@ -81,7 +83,7 @@ python -m venv .venv
 
 | 步骤 | 你要做的 | 产出 |
 |---|---|---|
-| **1 素材** | 粘文件夹路径（可多行）→ 扫描加入 → 打标 | `_work/pipe/pool.json` 素材池 + 缩略图 |
+| **1 素材** | 粘文件夹路径（可多行）→ 扫描加入 → 打标；有硬字幕的先用上方「去硬字幕」卡片处理 | `_work/pipe/pool.json` 素材池 + 缩略图 |
 | **2 脚本** | 填品名 / 受众 / 卖点 / 痛点 / 价格 / 信任点，勾选角度 → 生成 | `project.json` 里的 scripts（含每句的镜头提示） |
 | **3 配音** | 点「生成配音」，逐句合成并试听 | `audio_N.wav` + 每句起止时间 |
 | **4 分镜** | 点「自动对齐」，按语义标签给每句挑镜头 | 镜头清单 CSV + ASS 字幕 |
@@ -105,6 +107,7 @@ python -m venv .venv
 | `tts` | `engine`（`edge` / `sapi`）、`voice`、`rate`、`gap` |
 | `video` | `w` `h` `fps` `crf` `preset` `fit`、镜头时长 `shot` / `min_shot` / `max_shot`、字幕 `subtitle` `sub_font` `sub_size` `sub_margin` `sub_outline`、`hook` |
 | `video.bgm*` | `bgm_mode`（none / random / one）、`bgm_dirs`、`bgm_volume`、`bgm_fade` |
+| `desub` | `root`：VSR 安装目录，默认 `D:\Tools\VSR`；里面要有 `Python\python.exe` 和 `resources\backend` |
 
 **本地模型**：设置页「一键启动」会调用 `llama-server.exe`，自动挑带视觉能力的模型并配上 `mmproj`，端口默认 9931；启动后会真发一张小图验证「能不能看图」。默认参数 `-c 8192 -ub 512 -cmoe --moe-cache-mib 7000` 是实测比较稳的组合——**不要手写 `-ngl` 把显存塞满**，那样会触发 CPU 回退，速度掉到几十分之一。热缓存下次启动约 4 秒。
 
@@ -117,6 +120,7 @@ ShotCutter/
 ├─ app.py            # 后端：标准库 http.server，页面路由 + JSON 接口 + 任务轮询 + Range 视频流
 ├─ pipeline.py       # 流水线：切片 / 打标 / 写稿 / 配音 / 对齐 / 合成 / 批量 / 打包
 ├─ launch.py         # 脱离终端常驻启动（DETACHED_PROCESS + CREATE_BREAKAWAY_FROM_JOB）
+├─ vsr_runner.py     # 驱动 VSR 去字幕（按次切换检测开关、兜住空检测的崩溃）
 ├─ start.bat         # 前台启动
 ├─ serve.bat         # 双击 = launch.py
 ├─ requirements.txt
@@ -130,6 +134,7 @@ ShotCutter/
    ├─ pipe/pool.json             # 素材池
    ├─ pipe/projects/<id>/        # 项目：project.json、sub_N.ass、shotlist_N.csv、audio_N.wav
    ├─ pipe/out/*.mp4 + .json     # 成片与 sidecar 记录（时长、体积、码率、镜头数、BGM）
+   ├─ pipe/desub/                # 去字幕产物（*_no_sub.mp4 + index.json 记录源→输出）
    ├─ pipe/zip/                  # 批量下载打包结果（保留最近 8 个 / 6 小时）
    └─ thumbs/                    # 素材缩略图
 ```
@@ -157,6 +162,9 @@ ShotCutter/
 | 本地模型很慢（< 5 tok/s） | 多半是启动参数把显存占满触发了 CPU 回退，去掉 `-ngl`，用默认 `local_extra` |
 | 生成的视频在某些播放器打不开 | 导出统一 H.264 / yuv420p，兼容性最好；若素材本身是 HEVC，浏览器预览可能不支持，但成片没问题 |
 | 配音没声音 / 报错 | edge-tts 需要联网；断网时在设置里把引擎切成 `sapi` |
+| 去字幕提示「没找到 VSR」 | 路径不对：改 `pipeline.json` 的 `desub.root`，指向含 `Python\python.exe` 的那一层 |
+| 去字幕很慢 | 正常：STTN 逐帧重绘，1080×1920 约 2~5 帧/秒。想快就用「固定底部区域」，它跳过逐帧检测 |
+| 去字幕后画面糊成一片 | 「固定底部区域」的上下左右填大了，框到了画面主体；缩小到只盖住字幕那一条 |
 | 端口被占用 | 程序会自动往后找端口，看启动日志里的实际地址 |
 
 ---
@@ -175,6 +183,7 @@ ShotCutter/
 | POST | `/api/pipe/tts` `/align` `/compose` | 配音 / 分镜对齐 / 合成 |
 | POST | `/api/pipe/batch` | 批量出片 |
 | POST | `/api/pipe/output/zip` `/output/delete` | 打包 / 删除成片 |
+| POST | `/api/pipe/desub` | 去字幕（`folders` 或 `ids`，`mode`=auto/box，`box`=上下左右百分比） |
 | POST | `/api/pipe/llm/start` `/llm/stop` | 本地模型启停 |
 
 ---

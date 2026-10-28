@@ -63,6 +63,10 @@ button.sm{font-size:12px;padding:5px 10px}
 .tag.sem{background:#eaf7ef;color:#1a7f4b}
 .bar{height:4px;background:#eceae5;border-radius:2px;overflow:hidden;margin-top:8px}
 .bar i{display:block;height:100%;background:var(--accent);width:0;transition:.25s}
+.ds-box{align-items:center;gap:4px;margin-top:8px}
+.ds-box[hidden]{display:none}
+.ds-box .ti{width:50px;padding:3px 4px;border:1px solid var(--line-2);border-radius:6px;background:#fff;
+  color:var(--ink);font:inherit;font-size:12px;text-align:center}
 .pool{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px}
 .pi{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#fff;position:relative}
 .pi img{width:100%;aspect-ratio:16/10;object-fit:cover;display:block;background:#eae9e4}
@@ -223,6 +227,42 @@ body.has-fab main{padding-bottom:76px}
       </div>
       <div class="bar" id="scan-bar" style="display:none"><i></i></div>
       <div class="hintline" id="scan-msg" style="margin-top:8px"></div>
+    </div>
+
+    <div class="card" id="desub-card">
+      <h2>去硬字幕 <span class="hint">调用本机 VSR，处理完可直接进素材池</span></h2>
+      <div class="grid2">
+        <div>
+          <label class="f">要处理的文件夹（一行一个，递归扫描；已带 _no_sub 的自动跳过）</label>
+          <textarea id="ds-folders" rows="2" placeholder="E:\工作\直播素材\桂圆干\素材"></textarea>
+          <div class="row" style="margin-top:6px">
+            <button class="g sm" id="btn-ds-dir">选择文件夹</button>
+            <button class="b sm" id="btn-ds-run">开始去字幕</button>
+            <button class="g sm" id="btn-ds-sel" disabled title="先在下方素材池开「多选」勾选，再回来点这里">处理选中素材</button>
+          </div>
+        </div>
+        <div>
+          <label class="f">字幕区域</label>
+          <div class="row">
+            <select id="ds-mode" style="flex:1">
+              <option value="auto">自动检测（逐帧找字幕，稳但慢）</option>
+              <option value="box">固定底部区域（快，适合字幕位置固定的直播素材）</option>
+            </select>
+          </div>
+          <div class="row ds-box" id="ds-box" hidden>
+            <span class="hintline">上</span><input class="ti" id="ds-t" value="72">
+            <span class="hintline">下</span><input class="ti" id="ds-b" value="96">
+            <span class="hintline">左</span><input class="ti" id="ds-l" value="2">
+            <span class="hintline">右</span><input class="ti" id="ds-r" value="98">
+            <span class="hintline">% 相对画面</span>
+          </div>
+          <label class="hintline" style="display:flex;gap:6px;align-items:center;margin-top:8px">
+            <input type="checkbox" id="ds-add" checked style="width:auto"> 处理完加入素材池
+          </label>
+        </div>
+      </div>
+      <div class="bar" id="ds-bar" style="display:none"><i></i></div>
+      <div class="hintline" id="ds-msg" style="margin-top:8px">正在检测 VSR…</div>
     </div>
 
     <div class="card">
@@ -799,6 +839,9 @@ function updateSelBar(){
   $("#sel-cnt").textContent = "已选 " + S.sel.size + " 条";
   $("#btn-seldel").disabled = S.sel.size === 0;
   $("#btn-seldel").textContent = S.sel.size ? ("删除所选 " + S.sel.size + " 条") : "删除所选";
+  const ds = $("#btn-ds-sel");
+  ds.disabled = S.sel.size === 0;
+  ds.textContent = S.sel.size ? ("处理选中 " + S.sel.size + " 条") : "处理选中素材";
   const m = $("#btn-selmode");
   m.classList.toggle("on", S.selmode);
   m.textContent = S.selmode ? "多选中" : "多选";
@@ -877,6 +920,77 @@ $("#btn-addvid").onclick = async ()=>{
 };
 $("#btn-tag").onclick = ()=> doTag(false);
 $("#btn-tagall").onclick = ()=> doTag(true);
+
+/* ---------- 去硬字幕（VSR） ---------- */
+let DSINFO = null;
+async function loadDesub(){
+  const r = await api("/api/pipe/desub/info");
+  DSINFO = r;
+  const m = $("#ds-msg");
+  if(r.ok){
+    const bits = [];
+    if(r.mode) bits.push("算法 " + r.mode);
+    if(r.detect === false) bits.push("自动检测已关");
+    m.textContent = "VSR 就绪：" + r.root + (bits.length ? "（" + bits.join(" · ") + "）" : "")
+      + "　1080×1920 约 2~5 帧/秒，长片请耐心等；输出到 _work\\pipe\\desub";
+  }else{
+    m.textContent = "没找到 VSR：" + (r.root || "—") + "　在 pipeline.json 的 desub.root 里改路径";
+  }
+}
+$("#ds-mode").onchange = ()=>{ $("#ds-box").hidden = $("#ds-mode").value !== "box"; };
+function dsBox(){
+  const num = (sel, d)=>{ const v = parseFloat($(sel).value); return isNaN(v) ? d : v; };
+  return [num("#ds-t",72), num("#ds-b",96), num("#ds-l",2), num("#ds-r",98)];
+}
+async function runDesub(body, btn){
+  if(!DSINFO || !DSINFO.ok){ toast("没找到 VSR，检查 pipeline.json 的 desub.root"); return; }
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = "提交中…";
+  $("#ds-msg").textContent = "正在统计要处理的视频…";
+  const r = await api("/api/pipe/desub", body);
+  if(r.error || !r.job){
+    toast(r.error || r.message || "没有要处理的视频");
+    $("#ds-msg").textContent = r.error || r.message || "";
+    btn.disabled = false; btn.textContent = old; return;
+  }
+  btn.textContent = "处理中…";
+  const j = await pollJob(r.job, jj=>{
+    bar($("#ds-bar"), jj.progress || 0);
+    $("#ds-msg").textContent = jj.message || "";
+  });
+  $("#ds-bar").style.display = "none";
+  btn.disabled = false; btn.textContent = old;
+  if(j.state === "error"){
+    $("#ds-msg").textContent = "失败：" + (j.error || "");
+    toast("去字幕失败：" + (j.error || "").slice(0, 40));
+    return;
+  }
+  const rs = j.results || [];
+  const okN = rs.filter(x=>x.ok).length, badN = rs.filter(x=>!x.ok).length;
+  $("#ds-msg").textContent = (j.message || "完成") + (badN ? "；失败的是第 " + rs.map((x,i)=>x.ok?"":i+1).filter(Boolean).join("、") + " 个" : "");
+  toast("去字幕完成：" + okN + " 个成功" + (badN ? "，" + badN + " 个失败" : ""));
+  loadPool();
+}
+$("#btn-ds-dir").onclick = async ()=>{
+  $("#ds-msg").textContent = "正在打开选择窗口…";
+  const r = await api("/api/pipe/dialog", {});
+  if(r.state === "ok"){
+    const cur = $("#ds-folders").value.split("\n").map(s=>s.trim()).filter(Boolean);
+    if(!cur.includes(r.path)) cur.push(r.path);
+    $("#ds-folders").value = cur.join("\n");
+    $("#ds-msg").textContent = "已加入 " + cur.length + " 个目录；再点可继续加";
+  } else $("#ds-msg").textContent = r.message || "";
+};
+$("#btn-ds-run").onclick = ()=>{
+  const folders = $("#ds-folders").value.split("\n").map(s=>s.trim()).filter(Boolean);
+  if(!folders.length){ toast("先填或选至少一个文件夹"); return; }
+  runDesub({folders, mode:$("#ds-mode").value, box:dsBox(), add_pool:$("#ds-add").checked}, $("#btn-ds-run"));
+};
+$("#btn-ds-sel").onclick = ()=>{
+  if(!S.sel.size){ toast("先勾选素材"); return; }
+  runDesub({ids:[...S.sel], mode:$("#ds-mode").value, box:dsBox(), add_pool:$("#ds-add").checked}, $("#btn-ds-sel"));
+};
+
 function refreshTagBtn(){
   const untag = S.pool.filter(x=>!x.tagged).length;
   $("#btn-tag").disabled = untag === 0;
@@ -1746,6 +1860,9 @@ async function boot(){
     if(os && os.key && typeof os.dir === "number") S.outSort = {key:os.key, dir:os.dir};
   }catch(e){}
   await loadAngles();
+  loadDesub();
+  $("#ds-folders").value = localStorage.getItem("pipe_ds_folders") || "";
+  $("#ds-folders").addEventListener("input", ()=> localStorage.setItem("pipe_ds_folders", $("#ds-folders").value));
   $("#folder").value = localStorage.getItem("pipe_folders") || "";
   refreshFolCnt();
   await loadCfg();

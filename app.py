@@ -994,6 +994,8 @@ class Handler(BaseHTTPRequestHandler):
             self._file(WEB / "pipe.html", "text/html; charset=utf-8")
         elif u.path == "/api/pipe/config":
             self._json(pipe.public_cfg())
+        elif u.path == "/api/pipe/desub/info":
+            self._json(pipe.desub_info())
         elif u.path == "/api/pipe/angles":
             self._json({"items": [{"key": k, "label": v["label"], "hint": v.get("hint") or "",
                                    "group": v.get("group") or "classic"}
@@ -1364,6 +1366,36 @@ class Handler(BaseHTTPRequestHandler):
                 return
             n = pipe.add_scenes_of(video)
             self._json({"ok": True, "added": n})
+            return
+
+        if u.path == "/api/pipe/desub":
+            folders = payload.get("folders") or []
+            if isinstance(folders, str):
+                folders = [folders]
+            ids = payload.get("ids") or []
+            try:
+                videos = pipe.desub_collect(folders, ids)
+            except Exception as exc:  # noqa: BLE001
+                self._json({"error": str(exc)}, 400)
+                return
+            if not videos:
+                self._json({"ok": True, "job": None, "message": "没有要处理的视频（已处理过的会跳过）"})
+                return
+            info = pipe.desub_info()
+            if not info["ok"]:
+                self._json({"error": "没找到 VSR：%s（检查 pipeline.json 的 desub.root）" % info["root"]}, 400)
+                return
+            job = new_job("desub", len(videos))
+            job["message"] = "准备去字幕 %d 个视频…" % len(videos)
+            opts = {"mode": payload.get("mode") or "auto",
+                    "box": payload.get("box") or [72, 96, 2, 98],
+                    "add_pool": payload.get("add_pool", True),
+                    "force": bool(payload.get("force"))}
+            threading.Thread(target=_run_job,
+                             args=(job, pipe.desub_worker, videos, pipe.load_cfg(), job, opts),
+                             daemon=True).start()
+            self._json({"ok": True, "job": job["id"], "count": len(videos),
+                        "out_dir": info["out_dir"]})
             return
 
         if u.path == "/api/pipe/tag":
