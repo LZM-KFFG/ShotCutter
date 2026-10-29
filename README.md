@@ -109,7 +109,7 @@ python -m venv .venv
 | `video.bgm*` | `bgm_mode`（none / random / one）、`bgm_dirs`、`bgm_volume`、`bgm_fade` |
 | `desub` | `root`：VSR 安装目录，默认 `D:\Tools\VSR`；里面要有 `Python\python.exe` 和 `resources\backend` |
 
-**本地模型**：设置页「一键启动」会调用 `llama-server.exe`，优先挑「目录里有同族 `mmproj` 的模型」，`mmproj` 按族名配对（`Qwen3-VL-30B-A3B-…` 只配 `…-mmproj-…`，不会配给 `Qwen3-Coder`），端口默认 9931；启动后会真发一张小图验证「能不能看图」。默认参数 `-c 8192 -ub 512 -cmoe --moe-cache-mib 7000` 是实测比较稳的组合——**不要手写 `-ngl` 把显存塞满**，那样会触发 CPU 回退，速度掉到几十分之一。热缓存下次启动约 4 秒。
+**本地模型**：设置页「一键启动」会调用 `llama-server.exe`，优先挑「目录里有同族 `mmproj` 的模型」，`mmproj` 按族名配对（`Qwen3-VL-30B-A3B-…` 只配 `…-mmproj-…`，不会配给 `Qwen3-Coder`），端口默认 9931；启动后会真发一张小图验证「能不能看图」。默认参数 `-c 8192 -ub 512 -cmoe --moe-cache-mib 7000 --parallel 1` 是实测比较稳的组合（`--parallel 1` 没写会自动补：多槽会让 MoE 的每个请求都掉到 1~2 tok/s）——**不要手写 `-ngl` 把显存塞满**，那样会触发 CPU 回退，速度掉到几十分之一。热缓存下次启动约 4 秒。
 
 ---
 
@@ -160,6 +160,9 @@ ShotCutter/
 | 批量下载失败 | 先确认服务活着；打包是同步的，几十条会等几秒 |
 | 报「未找到 ffmpeg」 | 按安装第 2 步把 ffmpeg 复制到 `.venv\Scripts\`，或把系统 ffmpeg 加进 PATH |
 | 本地模型很慢（< 5 tok/s） | 多半是启动参数把显存占满触发了 CPU 回退，去掉 `-ngl`，用默认 `local_extra` |
+| 打标很慢 / 一直卡在同一条 | 本地模型是**串行**跑的，约 5 秒一张（435 张约 35~40 分钟），每 8 张落一次盘，中途刷新页面不会白跑。想快就换云端视觉 API，会自动 4 路并发 |
+| 点「生成脚本」提示「本地模型 N 秒内没返回」 | 模型被别的任务占满了（以前打标 4 路并发就会这样）。现在打标已串行、服务端单槽，一般不会再撞；等打标结束再点即可 |
+| 重启 ShotCutter 后本地模型不见了 | 模型是服务拉起来的子进程，重启服务会一起退出，再点一次「启动本地模型」即可（约 12 秒） |
 | 启动模型报 `mismatch between text model (n_embd=…) and mmproj (n_embd=…)` | 选的主模型和 `mmproj` 不是同一系列（例如 Qwen3-Coder 配了 Qwen3-VL 的投影层）。现在程序会先按族名配对，配不上就不加 `--mmproj`，启动失败时还会自动去掉它重试一次（退化成纯文本）。想看图就换回同系列 VL 模型 |
 | 生成的视频在某些播放器打不开 | 导出统一 H.264 / yuv420p，兼容性最好；若素材本身是 HEVC，浏览器预览可能不支持，但成片没问题 |
 | 配音没声音 / 报错 | edge-tts 需要联网；断网时在设置里把引擎切成 `sapi` |

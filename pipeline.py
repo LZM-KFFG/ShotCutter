@@ -73,7 +73,7 @@ DEFAULT_CFG = {
         "vision_model": "", "bypass_proxy": True,
         # 本地模型一键启动用（llama.cpp）
         "local_dir": "", "local_model": "", "local_port": 9931,
-        "local_extra": "-c 8192 -ub 512 -cmoe --moe-cache-mib 7000",
+        "local_extra": "-c 8192 -ub 512 -cmoe --moe-cache-mib 7000 --parallel 1",
     },
     "tts": {"engine": "edge", "voice": "zh-CN-XiaoxiaoNeural", "rate": "+8%", "gap": 0.08},
     "video": {
@@ -821,16 +821,17 @@ def _grab_frame(src: str, t: float, dst: Path, width: int = 360) -> bool:
         return False
 
 
-def grab_frames(item: dict, count: int = 3) -> list[Path]:
+def grab_frames(item: dict, count: int = 3, width: int = 360, prefix: str = "f") -> list[Path]:
+    """抽 count 帧。width/prefix 分开缓存：本地小图（s*）和云端大图（f*）互不覆盖。"""
     base = FRAMES / item["id"]
     base.mkdir(parents=True, exist_ok=True)
     dur = max(0.05, item["dur"])
-    times = [item["start"] + dur * r for r in ([0.18, 0.5, 0.82] if count >= 3 else [0.35, 0.75][:count])]
+    times = [item["start"] + dur * r for r in ([0.18, 0.5, 0.82] if count >= 3 else [0.34, 0.72][:count])]
     outs: list[Path] = []
     for i, t in enumerate(times[:count]):
-        dst = base / ("f%d.jpg" % i)
+        dst = base / ("%s%d.jpg" % (prefix, i))
         if not dst.exists():
-            _grab_frame(item["path"], t, dst)
+            _grab_frame(item["path"], t, dst, width)
         if dst.exists():
             outs.append(dst)
     return outs
@@ -1010,8 +1011,10 @@ def _probe_vision(cfg: dict, ttl: float = 600) -> bool:
     now = time.time()
     with _VISION_LOCK:
         hit = _VISION_PROBE.get(url)
-    if hit and now - hit[0] < ttl:
-        return hit[1]
+    if hit:
+        # 成功缓存久一点；失败只缓存 60 秒 —— 否则模型重启后要等 10 分钟才恢复语义打标
+        if now - hit[0] < (ttl if hit[1] else 60):
+            return hit[1]
     if not key:
         key = "sk-local"
     body = {"model": model or "x", "max_tokens": 1, "messages": [{"role": "user", "content": [
@@ -1332,6 +1335,12 @@ def start_local() -> dict:
         base = [info["exe"], "-m", info["model"],
                 "--port", str(port), "--host", "127.0.0.1", "--no-webui"]
         extra = _split_args(info["extra"])
+        if not any(a in ("--parallel", "-np") or a.startswith("--parallel=") or a.startswith("-np=")
+                       for a in extra):
+            # 多槽（默认 4）会让 MoE 模型每个请求都掉到 1~2 tok/s：
+            # 4 个槽各 8192 ctx 的 KV 一起挤显存，生成速度比单槽慢一个数量级。
+            # 打标/写稿都是串行的，单槽反而最快。
+            extra += ["--parallel", "1"]
         args = list(base)
         if info.get("mmproj"):
             args += ["--mmproj", info["mmproj"]]
@@ -1447,8 +1456,13 @@ def llm_chat(messages: list, cfg: dict, model: str = "", max_tokens: int = 1500,
         detail = e.read()[:400].decode("utf-8", "replace")
         raise RuntimeError("接口返回 %s：%s" % (e.code, detail))
     except Exception as e:  # noqa: BLE001
+        msg = str(e)
         if local:
-            raise RuntimeError("连不上本地模型 %s（llama-server 起来了吗？）" % url)
+            # 读超时和「端口根本没开」是两回事，别让人以为是服务没起来
+            if "timed out" in msg.lower() or "timeout" in msg.lower():
+                raise RuntimeError(
+                    "本地模型 %d 秒内没返回结果（模型太慢或被别的任务占满了），稍后再试" % timeout)
+            raise RuntimeError("连不上本地模型 %s（llama-server 起来了吗？）：%s" % (url, msg))
         raise RuntimeError("连接失败：%s" % e)
     try:
         j = json.loads(raw)
@@ -1495,10 +1509,38 @@ def tag_worker(items: list[dict], cfg: dict, job: dict, force: bool = False) -> 
     errors = 0
     results: dict[str, dict] = {}
 
+    def flush() -> None:
+        """把已完成的结果写回素材池（调用方需持锁）。
+        以前只在整批结束时写一次：435 张图要跑近一小时，中途刷新页面或断开连接
+        就白干，素材池里还是 0 已打标。现在每 8 条落一次盘。"""
+        if not results:
+            return
+        pool = _pool_load()
+        for pid, got in results.items():
+            cur = pool["items"].get(pid)
+            if not cur:
+                continue
+            cur.update(got)
+            cur["tagged"] = True
+            cur["tagged_at"] = time.time()
+        _pool_save(pool)
+        results.clear()
+
+    try:
+        _url, _, _ = _llm_endpoint(cfg)
+    except Exception:  # noqa: BLE001
+        _url = ""
+    _local = bool(_url) and is_local_url(_url)
+    # 本地模型 prefill 慢（MoE 跑在 CPU 上，约 40 tok/s），图越少越小越快：
+    # 3 张 360px ≈ 800 tokens ≈ 20 秒/张；2 张 224px ≈ 300 tokens ≈ 4 秒，标签质量基本没差。
+    _shots = 2 if (use_vision and _local) else 3
+    _width = 224 if (use_vision and _local) else 360
+    _prefix = "s" if (use_vision and _local) else "f"
+
     def one(it: dict) -> None:
         nonlocal done, errors
         try:
-            frames = grab_frames(it, 3)
+            frames = grab_frames(it, _shots, _width, _prefix)
             feats = visual_feats(frames)
             tags = list(feats.get("labels") or [])
             text = ""
@@ -1544,19 +1586,19 @@ def tag_worker(items: list[dict], cfg: dict, job: dict, force: bool = False) -> 
                 job["done"] = done
                 job["progress"] = done / max(1, len(items))
                 job["message"] = "打标 %d/%d" % (done, len(items))
+                if done % 8 == 0:
+                    flush()
 
-    with ThreadPoolExecutor(max_workers=4) as ex:
+    # 本地端点串行跑：并发只会把显存和算力抢成 1.5 tok/s；
+    # 云端 API 有真正的并行能力，4 路能把 435 张图的打标时间砍到 1/4。
+    workers = 1 if (not use_vision or not _url or _local) else 4
+    if workers == 1 and use_vision:
+        job["message"] = "打标（本地模型串行，约 3~5 秒/张）"
+    with ThreadPoolExecutor(max_workers=workers) as ex:
         list(ex.map(one, items))
 
-    pool = _pool_load()
-    for pid, got in results.items():
-        cur = pool["items"].get(pid)
-        if not cur:
-            continue
-        cur.update(got)
-        cur["tagged"] = True
-        cur["tagged_at"] = time.time()
-    _pool_save(pool)
+    with lock:
+        flush()
 
     job["result"] = {"tagged": len(items), "errors": errors, "semantic": state["on"]}
     job["message"] = "打标完成 %d 个素材%s" % (

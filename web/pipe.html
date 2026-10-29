@@ -630,11 +630,20 @@ async function api(u, body, _retried){
 function pollJob(id, onTick){
   return new Promise(res=>{
     const t0 = Date.now();
+    let last = -1, lastMove = Date.now();
     const iv = setInterval(async ()=>{
       const j = await api("/api/job?id=" + id);
       if(onTick) onTick(j);
+      const p = (j.progress || 0) + (j.done || 0);
+      if(p !== last){ last = p; lastMove = Date.now(); }
       if(j.state === "done" || j.state === "error" || j.error){ clearInterval(iv); res(j); }
-      else if(Date.now() - t0 > 900000){ clearInterval(iv); res({state:"error", error:"等太久了，已停止等待（后台可能还在跑）"}); }
+      // 只要还有进展就一直等（435 张图打标可能跑半小时），
+      // 真正卡住时 5 分钟就收手，别让人对着转圈干等。
+      else if(Date.now() - lastMove > 300000){
+        clearInterval(iv);
+        res({state:"error", error:"5 分钟没有新进展，先停在这里；后台可能还在跑，稍后刷新看看"});
+      }
+      else if(Date.now() - t0 > 5400000){ clearInterval(iv); res({state:"error", error:"等太久了（90 分钟），已停止等待"}); }
     }, 600);
   });
 }
