@@ -1574,6 +1574,24 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "job": job["id"]})
             return
 
+        if u.path == "/api/pipe/tts_all":
+            p = pipe.project_load(payload.get("pid") or "")
+            if not p:
+                self._json({"error": "项目不存在"}, 404)
+                return
+            scripts = p.get("scripts") or []
+            if not scripts:
+                self._json({"error": "还没有脚本，先在第 2 步生成脚本"}, 400)
+                return
+            job = new_job("tts", len(scripts))
+            job["message"] = "准备给 %d 条脚本配音…" % len(scripts)
+            threading.Thread(target=_run_job,
+                             args=(job, pipe.tts_all_worker, p, pipe.load_cfg(), job,
+                                   bool(payload.get("force"))),
+                             daemon=True).start()
+            self._json({"ok": True, "job": job["id"], "count": len(scripts)})
+            return
+
         if u.path == "/api/pipe/tts":
             p, s, err = _pipe_get(payload.get("pid"), payload.get("idx"))
             if err:

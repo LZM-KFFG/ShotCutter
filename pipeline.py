@@ -2290,6 +2290,47 @@ def _map_bounds(texts: list[str], bounds: list[dict], audio_dur: float) -> list[
     return out
 
 
+def tts_all_worker(project: dict, cfg: dict, job: dict, force: bool = False) -> None:
+    """给所有脚本一次配完音。已经配好的跳过（force=True 才重做）。"""
+    scripts = project.get("scripts") or []
+    if not scripts:
+        raise RuntimeError("还没有脚本，先在第 2 步生成脚本")
+    total = len(scripts)
+    job["total"] = total
+    job["done"] = 0
+    made = skipped = 0
+    failed: list[dict] = []
+    for i, s in enumerate(scripts):
+        job_gate(job)
+        label = s.get("angle_label") or ("脚本 %d" % (i + 1))
+        if not force and _voice_ok(s):
+            skipped += 1
+            job["done"] = i + 1
+            job["progress"] = (i + 1) / total
+            job["message"] = "[%d/%d] %s 已有配音，跳过" % (i + 1, total, label)
+            continue
+        job["message"] = "[%d/%d] %s 配音中…" % (i + 1, total, label)
+        try:
+            sub = _SubJob(lambda f, i=i: job.__setitem__(
+                "progress", min(0.999, (i + max(0.0, min(1.0, f))) / total)))
+            tts_worker(project, s, cfg, sub)
+            made += 1
+        except JobCancelled:
+            job["message"] = "已停止：新配 %d 条，跳过 %d 条" % (made, skipped)
+            job["state"] = "cancel"
+            return
+        except Exception as exc:  # noqa: BLE001
+            failed.append({"idx": i, "angle": label, "error": _short(str(exc), 160)})
+        job["done"] = i + 1
+        job["progress"] = (i + 1) / total
+
+    job["message"] = "配音完成：新配 %d 条，跳过 %d 条%s" % (
+        made, skipped, ("，%d 条失败" % len(failed)) if failed else "")
+    job["result"] = {"made": made, "skipped": skipped, "failed": failed}
+    job["state"] = "done"
+    job["progress"] = 1.0
+
+
 # ---------------------------------------------------------------- ④ 对齐
 
 def _keys(hint: str) -> list[str]:
@@ -2788,7 +2829,7 @@ def batch_worker(project: dict, idxs: list, cfg: dict, job: dict,
             continue
     valid = [i for i in want if 0 <= i < len(scripts)] or list(range(len(scripts)))
 
-    variants = max(1, min(8, int(opts.get("variants") or 1)))
+    variants = max(1, min(20, int(opts.get("variants") or 1)))
     redo_tts = bool(opts.get("redo_tts"))
     realign = bool(opts.get("realign", True))
     unit_total = len(valid) * variants

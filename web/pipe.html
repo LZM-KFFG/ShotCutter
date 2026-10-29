@@ -383,6 +383,7 @@ body.has-fab main{padding-bottom:76px}
       </div>
       <div class="row" style="margin-top:14px">
         <button class="b" id="btn-tts">生成配音</button>
+        <button class="g" id="btn-tts-all" title="给所有脚本都配一遍，已配好的自动跳过">全部配音</button>
         <span class="hintline" id="tts-msg"></span>
       </div>
       <div class="bar" id="tts-bar" style="display:none"><i></i></div>
@@ -609,6 +610,9 @@ body.has-fab main{padding-bottom:76px}
         <select id="bm-var">
           <option value="1">1 条</option><option value="2">2 条（换一套镜头）</option>
           <option value="3">3 条</option><option value="4">4 条</option><option value="5">5 条</option>
+          <option value="6">6 条</option><option value="7">7 条</option><option value="8">8 条</option>
+          <option value="10">10 条</option><option value="12">12 条</option>
+          <option value="15">15 条</option><option value="20">20 条</option>
         </select></div>
       <div><label class="f">配音</label>
         <select id="bm-tts">
@@ -1343,7 +1347,7 @@ async function renderTTS(){
   const s = curScript();
   if(!s){ box.appendChild(mk("div","empty","先去上一步生成脚本")); return; }
   if(!s.tts){
-    box.appendChild(mk("div","empty","还没配音。点上面的「生成配音」。"));
+    box.appendChild(mk("div","empty","还没配音。点上面的「生成配音」配这一条，或「全部配音」一次配完所有脚本。"));
     return;
   }
   const t = s.tts;
@@ -1374,6 +1378,23 @@ function curScript(){
 $("#rate").oninput = e=>{
   const v = parseInt(e.target.value,10);
   $("#rate-v").textContent = (v>=0?"+":"") + v + "%";
+};
+$("#btn-tts-all").onclick = async ()=>{
+  const scripts = (S.project && S.project.scripts) || [];
+  if(!scripts.length){ toast("先生成脚本"); return; }
+  await api("/api/pipe/config", {tts:{voice:$("#voice").value,
+    rate:(parseInt($("#rate").value,10)>=0?"+":"") + $("#rate").value + "%"}});
+  const btn = $("#btn-tts-all");
+  btn.disabled = true; $("#btn-tts").disabled = true;
+  const r = await api("/api/pipe/tts_all", {pid:S.pid});
+  if(r.error){ toast(r.error); btn.disabled = false; $("#btn-tts").disabled = false; return; }
+  const j = await pollJob(r.job, jj=>{ bar($("#tts-bar"), jj.progress||0); $("#tts-msg").textContent = jj.message||""; });
+  $("#tts-bar").style.display = "none";
+  btn.disabled = false; $("#btn-tts").disabled = false;
+  $("#tts-msg").textContent = j.state === "error" ? ("失败：" + j.error) : (j.message || "完成");
+  await reloadProject();
+  renderScripts(); renderTTS();
+  toast(j.state === "cancel" ? "已停止，已配好的保留" : "全部配音完成");
 };
 $("#btn-tts").onclick = async ()=>{
   const s = curScript(); if(!s){ toast("先生成脚本"); return; }
