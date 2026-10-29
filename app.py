@@ -1005,6 +1005,17 @@ class Handler(BaseHTTPRequestHandler):
             self._json(pipe.public_cfg())
         elif u.path == "/api/pipe/desub/info":
             self._json(pipe.desub_info())
+        elif u.path == "/api/pipe/desub/list":
+            items = pipe.desub_list()
+            total = sum(i["size"] for i in items)
+            self._json({"ok": True, "items": items, "count": len(items), "size": total})
+        elif u.path == "/api/pipe/desub/file":
+            name = (q.get("name") or [""])[0]
+            f = pipe.DESUB_DIR / Path(name).name if name else None
+            if f and f.exists() and f.is_file() and f.suffix.lower() == ".mp4":
+                self._stream(f, attachment=f.name)
+            else:
+                self.send_error(404)
         elif u.path == "/api/pipe/angles":
             self._json({"items": [{"key": k, "label": v["label"], "hint": v.get("hint") or "",
                                    "group": v.get("group") or "classic"}
@@ -1403,6 +1414,20 @@ class Handler(BaseHTTPRequestHandler):
                 return
             n = pipe.add_scenes_of(video)
             self._json({"ok": True, "added": n})
+            return
+
+        if u.path == "/api/pipe/desub/zip":
+            try:
+                self._json(pipe.desub_zip(payload.get("names") or None))
+            except Exception as exc:  # noqa: BLE001
+                self._json({"error": str(exc)}, 400)
+            return
+
+        if u.path == "/api/pipe/desub/pool":
+            try:
+                self._json(pipe.desub_add(payload.get("names") or None))
+            except Exception as exc:  # noqa: BLE001
+                self._json({"error": str(exc)}, 400)
             return
 
         if u.path == "/api/pipe/desub":

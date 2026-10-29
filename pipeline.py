@@ -41,6 +41,7 @@ PIPE = WORK / "pipe"
 FRAMES = PIPE / "frames"
 OUT = PIPE / "out"
 ZIP_DIR = PIPE / "zip"
+DESUB_DIR = PIPE / "desub"
 POOL_PATH = PIPE / "pool.json"
 CFG_PATH = ROOT / "pipeline.json"
 
@@ -366,6 +367,87 @@ def _desub_one(src: Path, dst: Path, py: Path, cwd: Path, area, job: dict,
     return dst
 
 
+def desub_list() -> list[dict]:
+    """已经去完字幕的文件（按时间新→旧）。"""
+    out: list[dict] = []
+    try:
+        for p in sorted(DESUB_DIR.glob("*.mp4"), key=lambda x: x.stat().st_mtime, reverse=True):
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            out.append({"name": p.name, "size": st.st_size, "mtime": st.st_mtime})
+    except Exception:
+        pass
+    return out
+
+
+def desub_add(names: list | None = None) -> dict:
+    """把去字幕产物加入素材池（已有的跳过）。名字为空就加全部。"""
+    targets = ([DESUB_DIR / Path(str(n)).name for n in names] if names
+               else sorted(DESUB_DIR.glob("*.mp4")))
+    pool = _pool_load()
+    added = skipped = bad = 0
+    for f in targets:
+        if not f.is_file():
+            bad += 1
+            continue
+        try:
+            d = media_duration(f)
+        except Exception:
+            d = 0.0
+        if d <= 0.05:
+            bad += 1
+            continue
+        pid = _clip_id(str(f.resolve()), 0.0, d)
+        if pid in pool["items"]:
+            skipped += 1
+            continue
+        pool["items"][pid] = {
+            "id": pid, "path": str(f.resolve()), "name": f.name,
+            "start": 0.0, "end": round(d, 3), "dur": round(d, 3),
+            "src_kind": "desub", "video_token": "", "index": 1,
+            "tags": [], "feats": {}, "tagged": False, "text": "",
+            "added": time.time(),
+        }
+        added += 1
+    if added:
+        _pool_save(pool)
+    return {"added": added, "skipped": skipped, "bad": bad, "total": len(targets)}
+
+
+def desub_zip(names: list | None = None, max_count: int = 200) -> dict:
+    """把去字幕的视频打成一个 zip 方便下载复用。视频已压缩，用 STORED 直接拼。"""
+    if names:
+        files = [DESUB_DIR / Path(str(n)).name for n in names]
+    else:
+        files = sorted(DESUB_DIR.glob("*.mp4"), key=lambda x: x.stat().st_mtime, reverse=True)
+    real = [f for f in files if f.is_file() and f.suffix.lower() == ".mp4"]
+    if not real:
+        raise RuntimeError("还没有去字幕的视频")
+    if len(real) > max_count:
+        raise RuntimeError("一次最多打包 %d 个，先挑一部分吧" % max_count)
+    total = sum(f.stat().st_size for f in real if f.exists())
+    name = "去字幕_%s_%d条.zip" % (time.strftime("%m%d_%H%M%S"), len(real))
+    target = ZIP_DIR / name
+    tmp = target.with_suffix(".part")
+    try:
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED, allowZip64=True) as z:
+            for f in real:
+                z.write(f, arcname=f.name)
+        tmp.replace(target)
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
+    _out_zip_prune()
+    return {"ok": True, "name": name, "count": len(real), "size": total,
+            "zip_size": target.stat().st_size,
+            "url": "/api/pipe/zip?name=" + urllib.parse.quote(name)}
+
+
 def desub_worker(videos, cfg: dict, job: dict, opts: dict | None = None) -> dict:
     """批量去字幕。opts: mode=auto|box, box=[上,下,左,右] 百分比, add_pool, force。"""
     opts = opts or {}
@@ -373,7 +455,7 @@ def desub_worker(videos, cfg: dict, job: dict, opts: dict | None = None) -> dict
     if not info["ok"]:
         raise RuntimeError("没找到 VSR：%s（检查 pipeline.json 里的 desub.root）" % info["root"])
     py, cwd = Path(info["python"]), Path(info["entry"]).parent
-    out_dir = PIPE / "desub"
+    out_dir = DESUB_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
 
     mode = str(opts.get("mode") or "auto").lower()
@@ -387,6 +469,7 @@ def desub_worker(videos, cfg: dict, job: dict, opts: dict | None = None) -> dict
     total = len(videos)
     made = skipped = 0
     failed: list[dict] = []
+    skipped_names: list[str] = []      # 已经存在、被跳过的也要补进素材池
     index = _desub_index()
     base_detect = mode != "box"
     for i, raw in enumerate(videos):
@@ -401,6 +484,7 @@ def desub_worker(videos, cfg: dict, job: dict, opts: dict | None = None) -> dict
         job["message"] = "[%d/%d] %s" % (i + 1, total, src.name)
         if dst.exists() and not force:
             skipped += 1
+            skipped_names.append(dst.name)
             job["done"] = i + 1
             job["progress"] = (i + 1) / max(1, total)
             continue
@@ -428,6 +512,8 @@ def desub_worker(videos, cfg: dict, job: dict, opts: dict | None = None) -> dict
                 src.with_name(src.stem + "_no_sub" + src.suffix).unlink(missing_ok=True)
             except Exception:
                 pass
+            if add_pool and skipped_names:
+                desub_add(skipped_names)
             job["message"] = "已停止：新生成 %d，跳过 %d" % (made, skipped)
             job["state"] = "cancel"
             return {"made": made, "skipped": skipped, "failed": failed, "cancelled": True}
@@ -437,7 +523,11 @@ def desub_worker(videos, cfg: dict, job: dict, opts: dict | None = None) -> dict
         job["done"] = i + 1
         job["progress"] = (i + 1) / max(1, total)
 
-    job["message"] = "去字幕完成：新生成 %d，跳过 %d，失败 %d" % (made, skipped, len(failed))
+    added_skip = 0
+    if add_pool and skipped_names:
+        added_skip = desub_add(skipped_names).get("added", 0)
+    job["message"] = "去字幕完成：新生成 %d，跳过 %d，失败 %d%s" % (
+        made, skipped, len(failed), ("，补入素材池 %d 个" % added_skip) if added_skip else "")
     if failed and not made and not skipped:
         raise RuntimeError("全部失败：" + str(failed[0].get("error") or "")[:140])
     return {"made": made, "skipped": skipped, "failed": failed}
