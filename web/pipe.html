@@ -2019,8 +2019,8 @@ $("#btn-lstart").onclick = async ()=>{
     $("#ltail").style.display = "block"; $("#ltail").textContent = msg; };
   if(r.error){ fail(r.error); return; }
   if(r.already){ toast("本地模型本来就在跑"); refreshLstat(); return; }
-  if(r.state === "ready"){ toast("本地模型已就绪"); refreshLstat(); return; }
-  toast("正在加载模型，首次约 30~60 秒");
+  if(r.state === "ready"){ toast(r.note || "本地模型已就绪"); refreshLstat(); return; }
+  toast(r.note || "正在加载模型，首次约 30~60 秒");
   startPoll();
 };
 $("#btn-lstop").onclick = async ()=>{

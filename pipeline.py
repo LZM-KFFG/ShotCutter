@@ -1147,8 +1147,26 @@ def _is_mmproj(p: Path) -> bool:
     return "mmproj" in p.name.lower()
 
 
+def _mm_family(name: str) -> str:
+    """把模型名归一成「族名」：去掉 mmproj 标记、量化后缀与扩展名。
+    Qwen3-VL-30B-A3B-abliterated-Q4_K_M.gguf          → qwen3-vl-30b-a3b-abliterated
+    Qwen3-VL-30B-A3B-abliterated-mmproj-Q8_0.gguf     → qwen3-vl-30b-a3b-abliterated
+    Qwen3-Coder-30B-A3B-abliterated-Q4_K_M.gguf       → qwen3-coder-30b-a3b-abliterated
+    """
+    n = name.lower()
+    n = re.sub(r"\.gguf$", "", n)
+    n = re.sub(r"[-_.]?mmproj[-_.]?", "-", n)
+    n = re.sub(r"[-_.]q\d[\w.]*$", "", n)   # -q4_k_m / -q8_0 这类量化尾巴
+    return n.strip("-_ .")
+
+
 def _find_mmproj(model: str | Path) -> str:
-    """给主模型找配套的视觉投影层。找不到返回空串。"""
+    """给主模型找配套的视觉投影层。找不到 / 不配套都返回空串。
+
+    以前只要目录里有 mmproj 就塞进去，于是 Qwen3-Coder 被配上了 Qwen3-VL 的 mmproj，
+    llama-server 直接 `mismatch between text model (n_embd = 2048) and mmproj (n_embd = 8192)`
+    退出。现在先比族名，族名对不上就不加 —— 宁可只当文本模型用，也不要起不来。
+    """
     try:
         p = Path(model)
         d = p.parent
@@ -1157,19 +1175,21 @@ def _find_mmproj(model: str | Path) -> str:
         cands = [q for q in d.glob("*.gguf") if _is_mmproj(q)]
         if not cands:
             return ""
-        if len(cands) == 1:
-            return str(cands[0])
-        stem = p.stem.lower()
-        head = stem.split("-q")[0][:18]        # 去掉量化后缀，留模型族名
-        def score(q: Path) -> int:
-            n = q.name.lower()
-            s = 0
-            if head and head in n:
-                s += 4                          # 同族优先
-            if "q8" in n:
-                s += 1                          # 视觉编码器 Q8 基本不掉点
-            return s
-        return str(max(cands, key=score))
+        key = _mm_family(p.name)
+        def same(q: Path) -> bool:
+            qk = _mm_family(q.name)
+            if not qk or not key:
+                return False
+            return qk == key or qk.startswith(key) or key.startswith(qk)
+        hit = [q for q in cands if same(q)]
+        if not hit:
+            # 名字完全对不上时，只有当目录里只有一个 mmproj、且主模型名字明显是视觉模型才勉强用它
+            looks_vl = re.search(r"(^|[-_])(vl|vision)([-_]|$)", p.name.lower()) is not None
+            if len(cands) == 1 and looks_vl:
+                hit = cands
+            else:
+                return ""
+        return str(max(hit, key=lambda q: 1 if "q8" in q.name.lower() else 0))
     except Exception:
         return ""
 
@@ -1309,11 +1329,13 @@ def start_local() -> dict:
         if not info["ok"]:
             return {"ok": False, "port": port,
                     "error": "没找到 llama-server.exe 或 .gguf 模型。请在下面填 llama.cpp 目录（如 D:\\llama.cpp）"}
-        args = [info["exe"], "-m", info["model"],
+        base = [info["exe"], "-m", info["model"],
                 "--port", str(port), "--host", "127.0.0.1", "--no-webui"]
+        extra = _split_args(info["extra"])
+        args = list(base)
         if info.get("mmproj"):
             args += ["--mmproj", info["mmproj"]]
-        args += _split_args(info["extra"])
+        args += extra
         PIPE.mkdir(parents=True, exist_ok=True)
         logf = PIPE / "llama.log"
         try:
@@ -1322,23 +1344,45 @@ def start_local() -> dict:
             return {"ok": False, "error": "启动失败：%s" % exc, "port": port}
         LOCAL_STATE.update({"proc": proc, "pid": proc.pid, "t0": time.time(),
                             "port": port, "log": str(logf)})
-    # 等几秒看看是不是一启动就挂（参数不兼容时最常见）
-    t0 = time.time()
-    while time.time() - t0 < 3.5:
-        if local_health(port, timeout=0.6):
-            return {"ok": True, "state": "ready", "port": port, "pid": proc.pid,
-                    "model": Path(info["model"]).name,
-                    "mmproj": Path(info["mmproj"]).name if info.get("mmproj") else "",
-                    "vision": bool(info.get("mmproj"))}
-        if proc.poll() is not None:
-            return {"ok": False, "port": port, "exit": proc.returncode,
-                    "error": "llama-server 启动后立即退出：%s" % _tail(str(logf), 3)}
-        time.sleep(0.3)
-    return {"ok": True, "state": "starting", "port": port, "pid": proc.pid,
-            "model": Path(info["model"]).name,
-            "mmproj": Path(info["mmproj"]).name if info.get("mmproj") else "",
-            "vision": bool(info.get("mmproj")),
-            "exe": info["exe"]}
+
+    def wait(proc, secs: float = 3.5):
+        """True=已就绪，False=进程已退出，None=还在加载。"""
+        t0 = time.time()
+        while time.time() - t0 < secs:
+            if local_health(port, timeout=0.6):
+                return True
+            if proc.poll() is not None:
+                return False
+            time.sleep(0.3)
+        return None
+
+    mmproj = info.get("mmproj") or ""
+    state = wait(proc)
+    if state is False and mmproj:
+        tail = _tail(str(logf), 6)
+        # 模型和视觉投影层不配套（换模型后最常见）时 llama-server 会直接退出；
+        # 去掉 --mmproj 再起一次，至少文本能用，不至于整个功能不可用。
+        if "mismatch between text model" in tail or "failed to load multimodal" in tail:
+            mmproj = ""
+            logf = PIPE / "llama.log"
+            try:
+                proc = _spawn_detached(list(base) + extra, str(Path(info["exe"]).parent), str(logf))
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "error": "启动失败：%s" % exc, "port": port}
+            LOCAL_STATE.update({"proc": proc, "pid": proc.pid, "t0": time.time(),
+                                "port": port, "log": str(logf)})
+            state = wait(proc)
+    if state is False:
+        return {"ok": False, "port": port, "exit": proc.returncode,
+                "error": "llama-server 启动后立即退出：%s" % _tail(str(logf), 3)}
+
+    out = {"ok": True, "state": "ready" if state else "starting", "port": port, "pid": proc.pid,
+           "model": Path(info["model"]).name,
+           "mmproj": Path(mmproj).name if mmproj else "",
+           "vision": bool(mmproj), "exe": info["exe"]}
+    if not mmproj and info.get("mmproj"):
+        out["note"] = "视觉投影层和模型不配套，已按纯文本启动；要看图请换回同系列模型"
+    return out
 
 
 def stop_local() -> dict:
