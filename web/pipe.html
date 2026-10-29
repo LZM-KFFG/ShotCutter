@@ -421,7 +421,7 @@ body.has-fab main{padding-bottom:76px}
   <!-- ⑤ 合成 -->
   <section id="v5" hidden>
     <div class="card">
-      <h2>背景音乐 <span class="hint">口播是主音轨，BGM 自动压低；曲子比视频短会自动循环</span></h2>
+      <h2>背景音乐 <span class="hint">口播是主音轨，BGM 自动压低；曲子比视频短会自动循环；选中列表里某一首 = 固定用它</span></h2>
       <div class="row">
         <select id="bgm-sel" style="flex:1;min-width:240px"></select>
         <button class="g sm" id="btn-bgm-add">加音乐文件夹</button>
@@ -1674,10 +1674,15 @@ async function loadBgm(){
   const oNone = mk("option", null, "不要 BGM"); oNone.value = "__none__";
   const oRnd = mk("option", null, "随机一首（每条成片不一样）"); oRnd.value = "__random__";
   sel.appendChild(oNone); sel.appendChild(oRnd);
-  S.bgmItems.forEach(t=>{
-    const o = mk("option", null, t.name + (t.dur ? "  " + fmtDur(t.dur) : ""));
-    o.value = t.path; sel.appendChild(o);
-  });
+  if(S.bgmItems.length){
+    const og = document.createElement("optgroup");
+    og.label = "↓ 固定用这首（每条成片都一样）";
+    S.bgmItems.forEach(t=>{
+      const o = mk("option", null, t.name + (t.dur ? "  " + fmtDur(t.dur) : ""));
+      o.value = t.path; og.appendChild(o);
+    });
+    sel.appendChild(og);
+  }
   const mode = v.bgm_mode || "one";
   let pick;
   if(mode === "random") pick = "__random__";
@@ -1713,7 +1718,13 @@ async function loadBgm(){
   let msg;
   if(!dirs.length) msg = "还没加音乐文件夹——点「加音乐文件夹」，选一个放 BGM 的目录（支持 mp3 / m4a / wav / flac / ogg / aac）";
   else if(!S.bgmItems.length) msg = "目录里没找到音频文件，换一个目录试试";
-  else msg = "音乐库 " + S.bgmItems.length + " 首" + (mode === "random" ? "；合成时每条随机挑一首" : "");
+  else if(mode === "random") msg = "音乐库 " + S.bgmItems.length + " 首；合成时每条随机挑一首";
+  else {
+    const fixed = S.bgmItems.find(x=>x.path === ($("#bgm-sel").value || ""));
+    msg = "音乐库 " + S.bgmItems.length + " 首；" +
+          (fixed ? "已固定用「" + fixed.name + "」，每条成片都用这首"
+                 : "在下面列表选一首即为固定 BGM");
+  }
   if(r.bad && r.bad.length) msg += "；找不到的目录：" + r.bad.join("、");
   $("#bgm-msg").textContent = msg;
   updateBgmAudio();
