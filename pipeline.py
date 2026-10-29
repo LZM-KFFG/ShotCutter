@@ -2770,7 +2770,11 @@ def compose_worker(project: dict, script: dict, cfg: dict, job: dict, variant: s
     else:
         filt.append("[%d:a]alimiter=limit=0.95[aout]" % ai)
 
-    out = _unique_out("%s_%s%s_%s.mp4" % (_safe(project.get("name") or "成片"),
+    # 文件名前缀优先用当前品名：换品名重新写稿后，新成片名跟着变，
+    # 不再一直是建项目时那次填的名字
+    disp = ((project.get("product") or {}).get("name")
+            or project.get("name") or "成片")
+    out = _unique_out("%s_%s%s_%s.mp4" % (_safe(disp),
                                           _safe(script.get("angle_label") or "脚本"),
                                           ("_" + _safe(variant)) if variant else "",
                                           time.strftime("%m%d_%H%M%S")))

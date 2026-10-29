@@ -1555,6 +1555,10 @@ class Handler(BaseHTTPRequestHandler):
                 return
             product = payload.get("product") or p.get("product") or {}
             p["product"] = product
+            # 换品名重新写稿时，项目名跟着品名走，成片文件名才不会一直用旧名字
+            new_name = (product.get("name") or "").strip()
+            if new_name:
+                p["name"] = new_name
             angles = payload.get("angles") or list(pipe.ANGLES)
             target = float(payload.get("target") or 30)
             use_llm = payload.get("use_llm", True)
