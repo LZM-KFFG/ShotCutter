@@ -329,6 +329,12 @@ def _desub_one(src: Path, dst: Path, py: Path, cwd: Path, area, job: dict,
     tail = ""
     try:
         while True:
+            if job.get("cancel"):
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                raise JobCancelled()
             chunk = proc.stdout.read(256)
             if not chunk:
                 break
@@ -384,6 +390,12 @@ def desub_worker(videos, cfg: dict, job: dict, opts: dict | None = None) -> dict
     index = _desub_index()
     base_detect = mode != "box"
     for i, raw in enumerate(videos):
+        try:
+            job_gate(job)
+        except JobCancelled:
+            job["message"] = "已停止：新生成 %d，跳过 %d，失败 %d" % (made, skipped, len(failed))
+            job["state"] = "cancel"
+            return {"made": made, "skipped": skipped, "failed": failed, "cancelled": True}
         src = Path(raw)
         dst = desub_dst(src, out_dir, index)
         job["message"] = "[%d/%d] %s" % (i + 1, total, src.name)
@@ -410,6 +422,15 @@ def desub_worker(videos, cfg: dict, job: dict, opts: dict | None = None) -> dict
                 if d > 0.05:
                     add_clip(str(got), 0.0, d, name=got.name, src_kind="desub")
             job["results"].append({"src": str(src), "out": str(got), "ok": True})
+        except JobCancelled:
+            # 停止时正在跑的那一个不算失败，也不留下半成品
+            try:
+                src.with_name(src.stem + "_no_sub" + src.suffix).unlink(missing_ok=True)
+            except Exception:
+                pass
+            job["message"] = "已停止：新生成 %d，跳过 %d" % (made, skipped)
+            job["state"] = "cancel"
+            return {"made": made, "skipped": skipped, "failed": failed, "cancelled": True}
         except Exception as exc:  # noqa: BLE001
             failed.append({"src": str(src), "error": str(exc)})
             job["results"].append({"src": str(src), "ok": False, "error": str(exc)})
@@ -808,6 +829,27 @@ def out_delete(name: str) -> dict:
     res["name"] = name
     res["project_left"] = True          # 项目记录一律保留，方便继续改脚本/重出片
     return res
+
+
+# ---------------------------------------------------------------- 任务控制
+
+class JobCancelled(Exception):
+    """用户在界面上点了「停止」。"""
+
+
+def job_gate(job: dict) -> None:
+    """每个处理单元开始前调一次：暂停就原地等，停止就抛 JobCancelled。
+    长任务（打标 / 去字幕 / 批量出片）都在单元边界过这道闸，所以「暂停」是
+    「这一条做完就停」，不是把正在跑的 ffmpeg 冻住。"""
+    while job.get("pause") and not job.get("cancel"):
+        if job.get("state") != "paused":
+            job["state"] = "paused"
+            job["message"] = "已暂停（当前这一条做完就停）"
+        time.sleep(0.3)
+    if job.get("cancel"):
+        raise JobCancelled()
+    if job.get("state") == "paused":
+        job["state"] = "running"
 
 
 # ---------------------------------------------------------------- ① 打标
@@ -1594,13 +1636,30 @@ def tag_worker(items: list[dict], cfg: dict, job: dict, force: bool = False) -> 
     workers = 1 if (not use_vision or not _url or _local) else 4
     if workers == 1 and use_vision:
         job["message"] = "打标（本地模型串行，约 3~5 秒/张）"
-    with ThreadPoolExecutor(max_workers=workers) as ex:
-        list(ex.map(one, items))
+    cancelled = False
+    if workers == 1:
+        for it in items:
+            if job.get("cancel"):
+                cancelled = True
+                break
+            try:
+                job_gate(job)
+            except JobCancelled:
+                cancelled = True
+                break
+            one(it)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            list(ex.map(one, items))
 
     with lock:
         flush()
 
     job["result"] = {"tagged": len(items), "errors": errors, "semantic": state["on"]}
+    if cancelled:
+        job["message"] = "已停止：完成 %d/%d 个" % (done, len(items))
+        job["state"] = "cancel"
+        return
     job["message"] = "打标完成 %d 个素材%s" % (
         len(items), "" if state["on"] else "（仅视觉特征，语义标签需配视觉模型）")
     job["state"] = "done"
@@ -2618,6 +2677,7 @@ def batch_worker(project: dict, idxs: list, cfg: dict, job: dict,
     job["results"] = []
     made, failed = [], []
     done = 0
+    stop = False
 
     for k, i in enumerate(valid):
         s = scripts[i]
@@ -2644,7 +2704,14 @@ def batch_worker(project: dict, idxs: list, cfg: dict, job: dict,
             continue
 
         vspan = 0.85 / variants
+        if stop:
+            break
         for v in range(variants):
+            try:
+                job_gate(job)
+            except JobCancelled:
+                stop = True
+                break
             vbase = 0.15 + vspan * v
             tag = ("V%d" % (v + 1)) if variants > 1 else ""
 
@@ -2682,6 +2749,10 @@ def batch_worker(project: dict, idxs: list, cfg: dict, job: dict,
     job["batch"] = {"made": len(made), "failed": len(failed),
                     "variants": variants, "scripts": len(valid), "failures": failed}
     job["results"] = made
+    if stop:
+        job["message"] = "已停止：已出 %d 条，其余没做" % len(made)
+        job["state"] = "cancel"
+        return
     if not made:
         raise RuntimeError("一条都没出来：%s" % (failed[0]["error"] if failed else "未知原因"))
     job["message"] = "批量完成：%d 条成片，%d 条失败（%d 个脚本 × 每脚本 %d 版）" % (

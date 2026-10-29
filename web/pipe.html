@@ -171,6 +171,20 @@ video.prev{width:100%;max-width:340px;border-radius:10px;background:#000;display
   border:1px solid var(--line-2);border-radius:13px;box-shadow:0 10px 30px rgba(20,20,18,.16);
   opacity:0;pointer-events:none;transition:.16s;max-width:calc(100vw - 32px)}
 .olfab.on{opacity:1;transform:translateY(0);pointer-events:auto}
+/* 长任务控制条：打标 / 去字幕 / 批量出片 */
+.jobctl{position:fixed;top:64px;right:20px;z-index:58;width:268px;padding:10px 12px;background:#fff;
+  border:1px solid var(--line-2);border-radius:12px;box-shadow:0 10px 28px rgba(20,20,18,.14)}
+.jobctl[hidden]{display:none}
+.jc-top{display:flex;align-items:baseline;gap:8px;font-size:11.5px;color:var(--muted)}
+.jc-top b{font-size:12.5px;color:var(--ink);font-weight:650}
+.jc-pct{margin-left:auto;font-variant-numeric:tabular-nums}
+.jc-msg{margin:5px 0 7px;font-size:12px;color:var(--ink);line-height:1.45;word-break:break-all;
+  max-height:38px;overflow:hidden}
+.jc-bar{height:4px;background:#eceae5;border-radius:2px;overflow:hidden}
+.jc-bar i{display:block;height:100%;width:0;background:var(--accent);transition:.25s}
+.jc-acts{display:flex;gap:6px;margin-top:9px}
+.jc-acts button{flex:1}
+.jc-acts button.on{background:var(--accent-2);border-color:var(--accent);color:var(--accent)}
 .olfab b{font-size:13px;white-space:nowrap}
 .olfab .sz{font-size:11.5px;color:var(--muted);white-space:nowrap}
 .olfab .sp{width:8px}
@@ -480,6 +494,16 @@ body.has-fab main{padding-bottom:76px}
   </div>
 </main>
 
+<div class="jobctl" id="jobctl" hidden>
+  <div class="jc-top"><b id="jc-kind">任务</b><span class="jc-pct" id="jc-pct">0%</span></div>
+  <div class="jc-msg" id="jc-msg"></div>
+  <div class="jc-bar"><i id="jc-fill"></i></div>
+  <div class="jc-acts">
+    <button class="g sm" id="jc-pause" title="当前这一条做完就暂停，点「继续」接着跑">暂停</button>
+    <button class="g sm" id="jc-stop" title="尽快停下，已经完成的会保留">停止</button>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <div class="modal" id="modal">
@@ -627,6 +651,49 @@ async function api(u, body, _retried){
   }
   return j;
 }
+/* ---------- 长任务控制条（打标 / 去字幕 / 批量出片） ---------- */
+const JC_KINDS = {tag:"打标", desub:"去字幕", batch:"批量出片"};
+let JCID = null, JCPAUSE = false;
+function jcPaint(j){
+  $("#jc-kind").textContent = JC_KINDS[j.kind] || "任务";
+  const pct = Math.round((j.progress || 0) * 100);
+  $("#jc-pct").textContent = pct + "%";
+  $("#jc-msg").textContent = j.message || "";
+  $("#jc-fill").style.width = pct + "%";
+  JCPAUSE = !!j.pause || j.state === "paused";
+  const pb = $("#jc-pause");
+  pb.textContent = JCPAUSE ? "继续" : "暂停";
+  pb.classList.toggle("on", JCPAUSE);
+  pb.disabled = !!j.cancel;
+  const sb = $("#jc-stop");
+  sb.disabled = !!j.cancel;
+  sb.textContent = j.cancel ? "停止中…" : "停止";
+}
+function jcShow(j){ JCID = j.id; $("#jobctl").hidden = false; jcPaint(j); }
+function jcHide(){
+  JCID = null; $("#jobctl").hidden = true;
+  const pb = $("#jc-pause"), sb = $("#jc-stop");
+  pb.disabled = false; pb.textContent = "暂停"; pb.classList.remove("on");
+  sb.disabled = false; sb.textContent = "停止";
+}
+$("#jc-pause").onclick = async ()=>{
+  if(!JCID) return;
+  const act = JCPAUSE ? "resume" : "pause";
+  const r = await api("/api/job/control", {id:JCID, action:act});
+  if(r.error){ toast(r.error); return; }
+  JCPAUSE = !!r.pause;
+  const pb = $("#jc-pause");
+  pb.textContent = JCPAUSE ? "继续" : "暂停";
+  pb.classList.toggle("on", JCPAUSE);
+};
+$("#jc-stop").onclick = async ()=>{
+  if(!JCID) return;
+  const sb = $("#jc-stop");
+  sb.disabled = true; sb.textContent = "停止中…";
+  const r = await api("/api/job/control", {id:JCID, action:"stop"});
+  if(r.error){ toast(r.error); sb.disabled = false; sb.textContent = "停止"; }
+};
+
 function pollJob(id, onTick){
   return new Promise(res=>{
     const t0 = Date.now();
@@ -634,9 +701,13 @@ function pollJob(id, onTick){
     const iv = setInterval(async ()=>{
       const j = await api("/api/job?id=" + id);
       if(onTick) onTick(j);
+      if(JC_KINDS[j.kind] && j.state !== "done" && j.state !== "error" && j.state !== "cancel") jcShow(j);
       const p = (j.progress || 0) + (j.done || 0);
       if(p !== last){ last = p; lastMove = Date.now(); }
-      if(j.state === "done" || j.state === "error" || j.error){ clearInterval(iv); res(j); }
+      if(j.state === "paused") lastMove = Date.now();      // 暂停不算卡住
+      if(j.state === "done" || j.state === "error" || j.state === "cancel" || j.error){
+        clearInterval(iv); jcHide(); res(j);
+      }
       // 只要还有进展就一直等（435 张图打标可能跑半小时），
       // 真正卡住时 5 分钟就收手，别让人对着转圈干等。
       else if(Date.now() - lastMove > 300000){

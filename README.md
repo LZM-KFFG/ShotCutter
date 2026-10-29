@@ -93,6 +93,10 @@ python -m venv .venv
 
 **批量出片**：选好脚本和版本数（如 2 条脚本 × 3 版本 = 6 条），每条用不同随机种子重新挑镜头，文件名带 `_V1` `_V2` 区分；某条缺配音会自动补，失败的会列出来不影响其他条。
 
+**长任务随时能停**：打标 / 去字幕 / 批量出片跑起来后，右上角会浮出一个控制条（暂停 / 继续 / 停止）。
+暂停在当前这一条做完后生效，已完成的不会重做；停止会尽快中断——去字幕会直接杀掉正在跑的 VSR 进程，
+已经生成的文件和素材池里的打标结果都保留。
+
 **BGM**：设置页里可选「不加 / 随机 / 指定」，音乐库支持多个目录；合成时用 `-stream_loop -1` 循环、`afade` 淡入淡出、`amix=normalize=0` + `alimiter`，保证人声不被压小、也不削波。
 
 ---
@@ -187,6 +191,7 @@ ShotCutter/
 | POST | `/api/pipe/tts` `/align` `/compose` | 配音 / 分镜对齐 / 合成 |
 | POST | `/api/pipe/batch` | 批量出片 |
 | POST | `/api/pipe/output/zip` `/output/delete` | 打包 / 删除成片 |
+| POST | `/api/job/control` | 长任务控制：`{id, action: stop\|pause\|resume}` |
 | POST | `/api/pipe/desub` | 去字幕（`folders` 或 `ids`，`mode`=auto/box，`box`=上下左右百分比） |
 | POST | `/api/pipe/llm/start` `/llm/stop` | 本地模型启停 |
 

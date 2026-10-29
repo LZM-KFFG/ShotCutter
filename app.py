@@ -166,6 +166,9 @@ def new_job(kind: str, total: int) -> dict:
         "files": [],
         "error": "",
         "t0": time.time(),
+        # 任务控制：cancel=停止，pause=暂停（在单元边界生效）
+        "cancel": False,
+        "pause": False,
     }
     with LOCK:
         JOBS[jid] = job
@@ -1298,6 +1301,30 @@ class Handler(BaseHTTPRequestHandler):
 
         if u.path == "/api/pipe/llm/stop":
             self._json(pipe.stop_local())
+            return
+
+        if u.path == "/api/job/control":
+            jid = str(payload.get("id") or "")
+            act = str(payload.get("action") or "")
+            job = JOBS.get(jid)
+            if not job:
+                self._json({"error": "任务不存在（可能已经结束）"}, 404)
+                return
+            if act == "stop":
+                job["cancel"] = True
+                job["pause"] = False
+                job["message"] = "正在停止…"
+            elif act == "pause":
+                job["pause"] = True
+            elif act == "resume":
+                job["pause"] = False
+                if job.get("state") == "paused":
+                    job["state"] = "running"
+            else:
+                self._json({"error": "action 只能是 stop / pause / resume"}, 400)
+                return
+            self._json({"ok": True, "id": jid, "state": job.get("state"),
+                        "cancel": bool(job.get("cancel")), "pause": bool(job.get("pause"))})
             return
 
         if u.path == "/api/pipe/testllm":
