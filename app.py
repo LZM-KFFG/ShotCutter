@@ -1423,6 +1423,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": str(exc)}, 400)
             return
 
+        if u.path == "/api/pipe/desub/delete":
+            names = payload.get("names") or []
+            if not names:
+                self._json({"error": "先勾选要删的文件"}, 400)
+                return
+            try:
+                self._json(pipe.desub_delete(names))
+            except Exception as exc:  # noqa: BLE001
+                self._json({"error": str(exc)}, 400)
+            return
+
         if u.path == "/api/pipe/desub/pool":
             try:
                 self._json(pipe.desub_add(payload.get("names") or None))

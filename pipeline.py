@@ -416,6 +416,55 @@ def desub_add(names: list | None = None) -> dict:
     return {"added": added, "skipped": skipped, "bad": bad, "total": len(targets)}
 
 
+def desub_delete(names: list | None = None) -> dict:
+    """删除去字幕产物：进回收站，同时从素材池和 index 里摘掉。"""
+    real: list[Path] = []
+    seen = set()
+    for n in names or []:
+        p = DESUB_DIR / Path(str(n)).name
+        if p.suffix.lower() != ".mp4" or not p.is_file() or p.name in seen:
+            continue
+        seen.add(p.name)
+        real.append(p)
+    if not real:
+        raise RuntimeError("没有可删除的文件")
+
+    want = set()
+    for p in real:
+        try:
+            want.add(str(p.resolve()))
+        except OSError:
+            pass
+
+    res = trash([str(p) for p in real])
+    failed = {str(Path(x).name) for x in (res.get("failed") or [])}
+    deleted = [p.name for p in real if p.name not in failed]
+
+    pool_removed = 0
+    if deleted:
+        pool = _pool_load()
+        drop = []
+        for pid, it in pool["items"].items():
+            try:
+                if str(Path(it.get("path") or "").resolve()) in want:
+                    drop.append(pid)
+            except OSError:
+                continue
+        for pid in drop:
+            pool["items"].pop(pid, None)
+        if drop:
+            _pool_save(pool)
+            pool_removed = len(drop)
+
+        idx = _desub_index()
+        keep = {k: v for k, v in idx.items() if v not in set(deleted)}
+        if len(keep) != len(idx):
+            _desub_save_index(keep)
+
+    return {"ok": True, "deleted": len(deleted), "failed": sorted(failed),
+            "pool_removed": pool_removed}
+
+
 def desub_zip(names: list | None = None, max_count: int = 200) -> dict:
     """把去字幕的视频打成一个 zip 方便下载复用。视频已压缩，用 STORED 直接拼。"""
     if names:

@@ -72,6 +72,10 @@ button.sm{font-size:12px;padding:5px 10px}
 .ds-row:last-child{border-bottom:0}
 .ds-row .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
 .ds-row .sz{color:var(--muted);font-size:11.5px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.ds-all{display:flex;align-items:center;gap:5px;cursor:pointer}
+.ds-all input{width:auto}
+.ds-row input[type=checkbox]{width:auto;margin:0}
+#btn-ds-del:hover{color:var(--bad);border-color:#f0c8c8}
 .ds-box .ti{width:50px;padding:3px 4px;border:1px solid var(--line-2);border-radius:6px;background:#fff;
   color:var(--ink);font:inherit;font-size:12px;text-align:center}
 .pool{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px}
@@ -286,10 +290,13 @@ body.has-fab main{padding-bottom:76px}
       <div class="hintline" id="ds-msg" style="margin-top:8px">正在检测 VSR…</div>
       <div class="ds-files" id="ds-files" hidden>
         <div class="ds-fhead">
+          <label class="hintline ds-all"><input type="checkbox" id="ds-checkall"> 全选</label>
           <span class="hintline" id="ds-files-sum">已去字幕 0 个</span>
+          <span class="hintline" id="ds-sel-sum"></span>
           <span class="sp2"></span>
-          <button class="g sm" id="btn-ds-pool" title="把下面这些视频加进素材池，直接参与出片">全部加入素材池</button>
-          <button class="b sm" id="btn-ds-zip" title="打包成一个 zip 下载，方便留档复用">打包下载</button>
+          <button class="g sm" id="btn-ds-pool" title="把勾选的视频加进素材池，直接参与出片">加入素材池</button>
+          <button class="b sm" id="btn-ds-zip" title="把勾选的视频打包成一个 zip">下载所选</button>
+          <button class="g sm" id="btn-ds-del" title="删到回收站，同时从素材池里摘掉">删除</button>
         </div>
         <div class="ds-flist" id="ds-flist"></div>
       </div>
@@ -1037,15 +1044,34 @@ async function loadDesub(){
     m.textContent = "没找到 VSR：" + (r.root || "—") + "　在 pipeline.json 的 desub.root 里改路径";
   }
 }
+let DSITEMS = [], DSSEL = new Set();
+function dsUpdate(){
+  const n = DSSEL.size;
+  const total = DSITEMS.filter(x=>DSSEL.has(x.name)).reduce((a,b)=>a+(b.size||0),0);
+  $("#ds-sel-sum").textContent = n ? ("已选 " + n + " 个 · " + fmtSize(total)) : "";
+  $("#btn-ds-pool").disabled = n === 0;
+  $("#btn-ds-zip").disabled = n === 0;
+  $("#btn-ds-del").disabled = n === 0;
+  const all = DSITEMS.length && n === DSITEMS.length;
+  $("#ds-checkall").checked = all;
+  $("#ds-checkall").indeterminate = n > 0 && !all;
+}
 async function loadDesubFiles(){
   const r = await api("/api/pipe/desub/list");
-  const box = $("#ds-files"), list = $("#ds-flist"), items = r.items || [];
-  if(!items.length){ box.hidden = true; list.innerHTML = ""; return; }
+  const box = $("#ds-files"), list = $("#ds-flist");
+  DSITEMS = r.items || [];
+  const names = new Set(DSITEMS.map(i=>i.name));
+  DSSEL = new Set([...DSSEL].filter(n=>names.has(n)));
+  if(!DSITEMS.length){ box.hidden = true; list.innerHTML = ""; return; }
   box.hidden = false;
-  $("#ds-files-sum").textContent = "已去字幕 " + items.length + " 个 · 共 " + fmtSize(r.size || 0);
+  $("#ds-files-sum").textContent = "已去字幕 " + DSITEMS.length + " 个 · 共 " + fmtSize(r.size || 0);
   list.innerHTML = "";
-  items.forEach(it=>{
+  DSITEMS.forEach(it=>{
     const row = mk("div", "ds-row");
+    const ck = document.createElement("input");
+    ck.type = "checkbox"; ck.checked = DSSEL.has(it.name);
+    ck.onchange = ()=>{ if(ck.checked) DSSEL.add(it.name); else DSSEL.delete(it.name); dsUpdate(); };
+    row.appendChild(ck);
     row.appendChild(mk("span", "nm", it.name));
     row.appendChild(mk("span", "sz", fmtSize(it.size)));
     const b = mk("button", "g sm", "下载");
@@ -1053,24 +1079,46 @@ async function loadDesubFiles(){
     row.appendChild(b);
     list.appendChild(row);
   });
+  dsUpdate();
 }
+$("#ds-checkall").onchange = e=>{
+  if(e.target.checked) DSITEMS.forEach(i=>DSSEL.add(i.name));
+  else DSSEL.clear();
+  loadDesubFiles();
+};
 $("#btn-ds-pool").onclick = async ()=>{
+  if(!DSSEL.size){ toast("先勾选文件"); return; }
   const b = $("#btn-ds-pool");
   b.disabled = true;
-  const r = await api("/api/pipe/desub/pool", {});
+  const r = await api("/api/pipe/desub/pool", {names:[...DSSEL]});
   b.disabled = false;
   if(r.error){ toast(r.error); return; }
   toast("加入素材池 " + r.added + " 个" + (r.skipped ? "（已存在 " + r.skipped + " 个）" : ""));
   loadPool();
 };
 $("#btn-ds-zip").onclick = async ()=>{
+  if(!DSSEL.size){ toast("先勾选文件"); return; }
   const b = $("#btn-ds-zip");
   b.disabled = true; b.textContent = "打包中…";
-  const r = await api("/api/pipe/desub/zip", {});
-  b.disabled = false; b.textContent = "打包下载";
+  const r = await api("/api/pipe/desub/zip", {names:[...DSSEL]});
+  b.disabled = false; b.textContent = "下载所选";
   if(r.error){ toast(r.error); return; }
   toast("打包完成：" + r.count + " 个 / " + fmtSize(r.zip_size));
   location.href = r.url;
+};
+$("#btn-ds-del").onclick = async ()=>{
+  const n = DSSEL.size;
+  if(!n){ toast("先勾选文件"); return; }
+  if(!confirm("删除选中的 " + n + " 个去字幕视频？\n\n会进回收站（可恢复），并同时从素材池里移除。")) return;
+  const b = $("#btn-ds-del");
+  b.disabled = true; b.textContent = "删除中…";
+  const r = await api("/api/pipe/desub/delete", {names:[...DSSEL]});
+  b.disabled = false; b.textContent = "删除";
+  if(r.error){ toast(r.error); return; }
+  DSSEL.clear();
+  toast("已删除 " + r.deleted + " 个" + (r.pool_removed ? "（素材池同步移除 " + r.pool_removed + " 个）" : "")
+        + (r.failed && r.failed.length ? "，" + r.failed.length + " 个失败" : ""));
+  loadDesubFiles(); loadPool();
 };
 
 $("#ds-mode").onchange = ()=>{ $("#ds-box").hidden = $("#ds-mode").value !== "box"; };
