@@ -652,7 +652,7 @@ async function api(u, body, _retried){
   return j;
 }
 /* ---------- 长任务控制条（打标 / 去字幕 / 批量出片） ---------- */
-const JC_KINDS = {tag:"打标", desub:"去字幕", batch:"批量出片"};
+const JC_KINDS = {tag:"打标", desub:"去字幕", batch:"批量出片", scan:"扫描素材", script:"写脚本", tts:"配音", compose:"合成"};
 let JCID = null, JCPAUSE = false;
 function jcPaint(j){
   $("#jc-kind").textContent = JC_KINDS[j.kind] || "任务";

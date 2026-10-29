@@ -186,6 +186,12 @@ def _run_job(job: dict, fn, *args, **kwargs) -> None:
         if job.get("state") == "running":
             job["state"] = "done"
             job["progress"] = 1.0
+    except pipe.JobCancelled:
+        job["state"] = "cancel"
+        msg = str(job.get("message") or "")
+        if not msg or msg.startswith("正在停止"):
+            job["message"] = "已停止"
+
     except Exception as exc:  # noqa: BLE001
         job["state"] = "error"
         job["error"] = str(exc)
@@ -1313,7 +1319,8 @@ class Handler(BaseHTTPRequestHandler):
             if act == "stop":
                 job["cancel"] = True
                 job["pause"] = False
-                job["message"] = "正在停止…"
+                job["message"] = ("正在停止…（等当前这次请求返回）"
+                                  if job.get("kind") in ("script", "tts") else "正在停止…")
             elif act == "pause":
                 job["pause"] = True
             elif act == "resume":
@@ -1372,6 +1379,9 @@ class Handler(BaseHTTPRequestHandler):
                     job["message"] = msg
                     job["state"] = "done"
                     job["progress"] = 1.0
+                except pipe.JobCancelled:
+                    job["state"] = "cancel"
+                    job["message"] = "已停止：已加入的素材都保留了"
                 except Exception as exc:  # noqa: BLE001
                     job["state"] = "error"
                     job["error"] = str(exc)
@@ -1521,7 +1531,7 @@ class Handler(BaseHTTPRequestHandler):
             def _go():
                 job["message"] = "写脚本…"
                 r = pipe.gen_scripts(product, angles, target, pipe.load_cfg(),
-                                     list(dict.fromkeys(tags)), bool(use_llm))
+                                     list(dict.fromkeys(tags)), bool(use_llm), job)
                 for i, s in enumerate(r["scripts"]):
                     s["idx"] = i
                     s["target"] = target
@@ -1531,6 +1541,9 @@ class Handler(BaseHTTPRequestHandler):
                 job["result"] = {"mode": r["mode"], "note": r["note"], "count": len(r["scripts"])}
                 job["message"] = "生成 %d 条脚本（%s）" % (
                     len(r["scripts"]), "大模型" if r["mode"] == "llm" else "模板")
+                if r.get("cancelled"):
+                    job["state"] = "cancel"
+                    job["message"] = r.get("note") or "已停止"
 
             threading.Thread(target=_run_job, args=(job, _go), daemon=True).start()
             self._json({"ok": True, "job": job["id"]})

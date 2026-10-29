@@ -570,6 +570,8 @@ def scan_folders(folders: list, job: dict | None = None, recursive: bool = True)
     added, skipped, existed = 0, 0, 0
     have = set(_pool_load()["items"].keys())
     for i, p in enumerate(files):
+        if job:
+            job_gate(job)
         try:
             d = media_duration(p)
         except Exception:
@@ -1946,27 +1948,43 @@ def _parse_scripts(raw: str, chunk: list[str]) -> list[dict]:
 
 
 def gen_scripts(product: dict, angles: list[str], target: float, cfg: dict,
-                extra_tags: list[str] | None = None, use_llm: bool = True) -> dict:
+                extra_tags: list[str] | None = None, use_llm: bool = True,
+                job: dict | None = None) -> dict:
     """返回 {scripts:[...], mode:"llm"|"template", note:""}"""
     angles = [a for a in (angles or list(ANGLES)) if a in ANGLES] or list(ANGLES)
     tags = extra_tags or []
     if use_llm and llm_ready(cfg)[0]:
-        # 一次要 10 多条脚本时，模型的输出长度和质量都会掉，按 5 条一批分开问
-        chunks = [angles[i:i + 5] for i in range(0, len(angles), 5)]
+        # 一次要 10 多条脚本时，模型的输出长度和质量都会掉，分批问；
+        # 每批 3 条：单批 20~30 秒，点「停止」最多等这么久就能收手
+        chunks = [angles[i:i + 3] for i in range(0, len(angles), 3)]
         out, ok, err = [], 0, ""
-        for chunk in chunks:
-            try:
-                txt = llm_chat([{"role": "user", "content": script_prompt(product, chunk, target, tags)}],
-                               cfg, max_tokens=3200, temperature=0.85, timeout=180)
-                got = _parse_scripts(txt, chunk)
-                if got:
-                    out.extend(got)
-                    ok += 1
-                else:
+        try:
+            for chunk in chunks:
+                if job is not None:
+                    job_gate(job)      # 停止会在「当前这一批角度写完」后生效
+                try:
+                    txt = llm_chat([{"role": "user", "content": script_prompt(product, chunk, target, tags)}],
+                                   cfg, max_tokens=3200, temperature=0.85, timeout=180)
+                    got = _parse_scripts(txt, chunk)
+                    if got:
+                        out.extend(got)
+                        ok += 1
+                    else:
+                        out.extend(template_script(a, product, target) for a in chunk)
+                except Exception as exc:  # noqa: BLE001
+                    err = _short(str(exc), 160)
                     out.extend(template_script(a, product, target) for a in chunk)
-            except Exception as exc:  # noqa: BLE001
-                err = _short(str(exc), 160)
-                out.extend(template_script(a, product, target) for a in chunk)
+        except JobCancelled:
+            # 已经写完的批次留着，别因为点了停止就白跑
+            if out:
+                return {"scripts": out, "mode": "llm", "cancelled": True,
+                        "note": "已停止：保留了已生成的 %d 条" % len(out)}
+            raise
+        if job is not None and job.get("cancel"):
+            if out:
+                return {"scripts": out, "mode": "llm", "cancelled": True,
+                        "note": "已停止：只保留了已生成的 %d 条" % len(out)}
+            raise JobCancelled()
         if ok:
             got = {s["angle"] for s in out}
             for a in angles:
@@ -2078,6 +2096,7 @@ def tts_worker(project: dict, script: dict, cfg: dict, job: dict) -> None:
     gap = float(cfg["tts"].get("gap") or 0.0)
     engine = (cfg["tts"].get("engine") or "edge").lower()
 
+    job_gate(job)
     job["message"] = "合成配音…"
     job["progress"] = 0.15
     note = ""
@@ -2575,6 +2594,7 @@ def compose_worker(project: dict, script: dict, cfg: dict, job: dict, variant: s
                                           _safe(script.get("angle_label") or "脚本"),
                                           ("_" + _safe(variant)) if variant else "",
                                           time.strftime("%m%d_%H%M%S")))
+    job_gate(job)
     job["message"] = "渲染中…"
     args = (["-v", "error", "-y"] + inputs +
             ["-filter_complex", ";".join(filt),
@@ -2589,6 +2609,16 @@ def compose_worker(project: dict, script: dict, cfg: dict, job: dict, variant: s
                             creationflags=NO_WINDOW)
     assert proc.stdout is not None
     for line in proc.stdout:
+        if job.get("cancel"):
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            try:
+                out.unlink(missing_ok=True)     # 别留下半截成片
+            except Exception:
+                pass
+            raise JobCancelled()
         line = line.strip()
         if line.startswith("out_time_us=") and total > 0:
             try:
