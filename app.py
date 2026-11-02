@@ -1039,6 +1039,7 @@ class Handler(BaseHTTPRequestHandler):
                 "ok": True, "items": items, "count": len(items),
                 "tagged": sum(1 for i in items if i.get("tagged")),
                 "semantic": sum(1 for i in items if i.get("semantic")),
+                "health": pipe.pool_health(items),
             })
         elif u.path == "/api/pipe/projects":
             self._json({"ok": True, "items": pipe.project_list()})

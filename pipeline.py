@@ -73,8 +73,15 @@ DEFAULT_CFG = {
         "base_url": "", "api_key": "", "model": "",
         "vision_model": "", "bypass_proxy": True,
         # 本地模型一键启动用（llama.cpp）
+        # local_extra 说明：
+        #   -c 32768  上下文。agent 客户端（带 system prompt + 工具定义）单次就要 9K+，
+        #             8192 会直接报 exceed_context_size_error，必须给足。
+        #   KV 量化 q8_0 是必需的：32K 的 f16 KV 要 3GB，16GB 卡装不下。
+        #   -ub 32    必须为 32。llama.cpp 默认 512 会让 --moe-cache-mib 完全不生效
+        #             （实测同一模型 512 下 15 tok/s，32 下 45 tok/s）。
         "local_dir": "", "local_model": "", "local_port": 9931,
-        "local_extra": "-c 8192 -ub 512 -cmoe --moe-cache-mib 7000 --parallel 1",
+        "local_extra": ("-c 32768 -ub 32 -cmoe --moe-cache-mib 10240 "
+                        "--cache-type-k q8_0 --cache-type-v q8_0 --parallel 1"),
     },
     "tts": {"engine": "edge", "voice": "zh-CN-XiaoxiaoNeural", "rate": "+8%", "gap": 0.08},
     "video": {
@@ -793,6 +800,71 @@ def pool_drop_many(ids) -> int:
     if n:
         _pool_save(pool)
     return n
+
+
+def pool_health(items: list[dict] | None = None) -> dict:
+    """素材体检：看景别和画面大类够不够撑一条片子。
+
+    只统计、不改数据，结论放在 advice 里给前端显示。
+    景别缺口比"标签准不准"更致命：190 条里 179 条特写，怎么对齐都是一路怼脸，
+    这不是打分算法能救的，得靠补拍。
+    """
+    items = pool_list() if items is None else items
+    total = len(items)
+    out = {"total": total, "tagged": 0, "semantic": 0, "avg_dur": 0.0,
+           "shot": [], "top": [], "advice": []}
+    if not total:
+        out["advice"].append({"level": "tip", "text": "素材池是空的，先扫描一个文件夹加素材。"})
+        return out
+
+    out["tagged"] = sum(1 for i in items if i.get("tagged"))
+    out["semantic"] = sum(1 for i in items if i.get("semantic"))
+    out["avg_dur"] = round(sum(float(i.get("dur") or 0) for i in items) / total, 1)
+
+    shot_count = {w: 0 for w in SHOT_WORDS}
+    shot_count["未标景别"] = 0
+    for it in items:
+        tags = set(it.get("tags") or [])
+        hit = next((w for w in SHOT_WORDS if w in tags), "")
+        shot_count[hit or "未标景别"] += 1
+    out["shot"] = [{"k": k, "n": n, "pct": round(n * 100 / total, 1)}
+                   for k, n in shot_count.items()]
+
+    cat: dict[str, int] = {}
+    for it in items:
+        for t in _scene_tags(it):
+            cat[t] = cat.get(t, 0) + 1
+    out["top"] = [{"k": k, "n": n, "pct": round(n * 100 / total)}
+                  for k, n in sorted(cat.items(), key=lambda x: -x[1])[:6]]
+
+    pct = {r["k"]: r["pct"] for r in out["shot"]}
+    spec = pct.get("特写", 0.0)
+    wide = pct.get("全景", 0.0) + pct.get("远景", 0.0)
+    mid = pct.get("中景", 0.0) + pct.get("近景", 0.0)
+    adv = out["advice"]
+
+    if spec > 65 and total >= 15:
+        adv.append({"level": "warn",
+                    "text": "特写占 %d%%，成片容易一路怼脸、节奏单调，建议补些中景和全景。" % spec})
+    if wide < 8 and total >= 15:
+        adv.append({"level": "bad",
+                    "text": "全景/远景只有 %d 条（%d%%）——口播讲到场景、摆盘、整体效果时会挑不到画面，"
+                            "只能拿特写凑。" % (shot_count["全景"] + shot_count["远景"], wide)})
+    if mid < 12 and total >= 15:
+        adv.append({"level": "tip",
+                    "text": "中景只有 %d 条（%d%%），镜头之间缺过渡，容易特写硬切特写。"
+                            % (shot_count["中景"] + shot_count["近景"], mid)})
+    if out["top"] and out["top"][0]["pct"] >= 60:
+        adv.append({"level": "tip",
+                    "text": "画面大类集中在「%s」（%d%%），成片看着会有点单一。"
+                            % (out["top"][0]["k"], out["top"][0]["pct"])})
+    if out["tagged"] < total:
+        adv.append({"level": "tip",
+                    "text": "还有 %d 条没打标，对齐时只能按时长凑，可能挑到不相关的画面。"
+                            % (total - out["tagged"])})
+    if not adv:
+        adv.append({"level": "ok", "text": "景别和画面大类都够用，可以直接出片。"})
+    return out
 
 
 # ---------------------------------------------------------------- 删除（走回收站）
@@ -2228,7 +2300,10 @@ def tts_worker(project: dict, script: dict, cfg: dict, job: dict) -> None:
     pdir = project_dir(project["id"])
     adir = pdir / ("audio_%d" % int(script.get("idx", 0)))
     adir.mkdir(parents=True, exist_ok=True)
-    sents = script["sentences"]
+    # 空句子（还没写的行）不送去配音，否则会多出一段空口播、对齐时白占一个镜头
+    sents = [s for s in script["sentences"] if str(s.get("text") or "").strip()]
+    if not sents:
+        raise RuntimeError("这条脚本还没有文字，先写点内容再配音")
     texts = [s["text"] for s in sents]
     voice = (cfg["tts"].get("voice") or "zh-CN-XiaoxiaoNeural")
     rate = (cfg["tts"].get("rate") or "+0%")
@@ -2276,6 +2351,10 @@ def tts_worker(project: dict, script: dict, cfg: dict, job: dict) -> None:
     job["progress"] = 0.9
     if gap > 0 and mode == "sapi":
         pass
+    # 画面提示一起存进时间轴：对齐时按句选素材全靠它，不带就得回头查脚本
+    for t, src in zip(timings, sents):
+        if not t.get("hint"):
+            t["hint"] = str(src.get("hint") or "").strip()
     script["tts"] = {
         "audio": str(audio), "engine": mode, "voice": voice, "rate": rate,
         "sentences": timings, "total": round(total, 3), "note": note,
@@ -2382,6 +2461,12 @@ def tts_all_worker(project: dict, cfg: dict, job: dict, force: bool = False) -> 
 
 # ---------------------------------------------------------------- ④ 对齐
 
+SHOT_WORDS = ("特写", "近景", "中景", "全景", "远景")
+# 本地视觉特征打的曝光/色彩标签：选片时几乎没有区分度，不能跟"厨房""特写"同权
+CV_LABELS = {"明亮", "偏暗", "中间调", "暖色调", "冷色调", "中性色", "高饱和", "低饱和",
+             "正常饱和", "细节丰富", "主体突出", "中等细节", "动态", "轻微变化", "静止"}
+
+
 def _keys(hint: str) -> list[str]:
     raw = re.split(r"[\s/、,，·]+", hint or "")
     out = []
@@ -2392,10 +2477,59 @@ def _keys(hint: str) -> list[str]:
     return out
 
 
-def _score(item: dict, keys: list[str], usage: dict, want: float, last: dict | None) -> float:
+def _sem_tags(item: dict) -> set:
+    return {t for t in (item.get("tags") or []) if t not in CV_LABELS}
+
+
+MOOD_WORDS = {"干净", "温馨", "专业", "热闹", "自然"}
+GENERIC_TAGS = set(SHOT_WORDS) | MOOD_WORDS | {"画面有文字"}
+
+
+def _scene_tags(item: dict) -> set:
+    """真正区分画面的词（场景/主体/动作），不算景别和情绪形容词。"""
+    return _sem_tags(item) - GENERIC_TAGS
+
+
+def _blob(item: dict) -> str:
+    return (item.get("text") or "") + " " + " ".join(item.get("tags") or [])
+
+
+def _candidates(items: list[dict], keys: list[str]) -> list[dict]:
+    """先挑"内容对得上"的素材，一条都没有（素材里没这个主体/动作）才退回全池。
+
+    以前内容词和景别词同权相加，"中景 翻炒"会挑中一个中景的菌包：景别对了、画面跑题。
+    带货片里画面跑题比景别差一号严重得多，所以内容优先、景别当加分项。
+    """
+    other = [k for k in keys if k not in SHOT_WORDS]
+    if not other:
+        return items
+    hit = [it for it in items if any(k in _blob(it) for k in other)]
+    return hit or items
+
+
+def _score(item: dict, keys: list[str], usage: dict, want: float, last: dict | None,
+           used_sem: set | None = None) -> float:
+    """给一个素材打分。
+
+    景别单独加权：讲细节配个全景、讲场景配个特写，比配错场景更出戏，所以
+    hint 要的景别对上了给最高分，明显是别的景别直接扣分。
+    场景/主体/动作按普通关键词算；同一句里画面很像的镜头再压一点分，
+    避免一条 5 秒的口播下面连着三个"厨房+木耳+展示细节"。
+    """
+    sem = _sem_tags(item)
+    scene = _scene_tags(item)
+    blob = _blob(item)
     s = 0.0
-    blob = (item.get("text") or "") + " " + " ".join(item.get("tags") or [])
-    s += sum(2.2 for k in keys if k in blob)
+    want_shot = {k for k in keys if k in SHOT_WORDS}
+    s += sum(2.2 for k in keys if k not in SHOT_WORDS and k in blob)
+    if want_shot:
+        if want_shot & sem:
+            s += 4.2
+        elif sem & set(SHOT_WORDS):
+            s -= 2.2
+    if used_sem:
+        # 只有一个共同词（比如都是"木耳"）是正常的，重合两个以上说明画面很接近
+        s -= min(2.4, 1.2 * max(0, len(used_sem & scene) - 1))
     avail = item.get("dur") or 0.0
     if avail >= want:
         s += 0.9
@@ -2443,19 +2577,23 @@ def align(project: dict, script: dict, cfg: dict, seed: int | None = None) -> di
         while n > 1 and dur / n < min_shot:
             n -= 1
         seg = dur / n
-        keys = _keys(s.get("hint", ""))
+        # 配音时间轴里有 hint 就用它；老项目没存，按文本回脚本句子里找
+        keys = _keys(s.get("hint") or _hint_of(script, si, s.get("text", "")))
+        picks = _candidates(items, keys)
         first = True
+        used_sem: set = set()
         for k in range(n):
             pick = None
             best = -1e9
-            for it in items:
-                sc = _score(it, keys, usage, seg, last)
+            for it in picks:
+                sc = _score(it, keys, usage, seg, last, used_sem)
                 sc += rnd.random() * 0.35
                 if sc > best:
                     best, pick = sc, it
             if pick is None:
                 break
             usage[pick["id"]] = usage.get(pick["id"], 0) + 1
+            used_sem |= _scene_tags(pick)
             avail = pick["dur"]
             if avail >= seg:
                 room = avail - seg
@@ -2512,7 +2650,7 @@ def swap_clip(project: dict, script: dict, clip_index: int, cfg: dict) -> dict:
         raise RuntimeError("镜头序号越界")
     cur = clips[clip_index]
     items = pool_list()
-    keys = _keys(_hint_of(script, cur.get("sentence", 0)))
+    keys = _keys(_hint_of(script, cur.get("sentence", 0), cur.get("text", "")))
     ranked = sorted(items, key=lambda it: -_score(it, keys, {}, cur["want"], None))
     ids = [it["id"] for it in ranked]
     try:
@@ -2536,9 +2674,20 @@ def swap_clip(project: dict, script: dict, clip_index: int, cfg: dict) -> dict:
     return cur
 
 
-def _hint_of(script: dict, si: int) -> str:
+def _hint_of(script: dict, si: int, text: str = "") -> str:
+    """取某一镜对应的画面提示。
+
+    配音时间轴里的句子序号和脚本句子序号可能已经错位（删句、空句被跳过都会），
+    所以先按文本原样匹配，匹配不到再退回按序号取。
+    """
+    sents = script.get("sentences") or []
+    want = (text or "").strip()
+    if want:
+        for s in sents:
+            if (s.get("text") or "").strip() == want:
+                return str(s.get("hint") or "").strip()
     try:
-        return script["sentences"][si].get("hint", "")
+        return str(sents[si].get("hint") or "").strip()
     except Exception:
         return ""
 

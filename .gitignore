@@ -15,6 +15,9 @@ web/_tmp*
 web/_p4.html
 *.log
 
+# 本地 AI 助手记忆
+.workbuddy/
+
 # 系统
 Thumbs.db
 desktop.ini

@@ -61,6 +61,7 @@ button.sm{font-size:12px;padding:5px 10px}
 .hintline{font-size:11.5px;color:var(--muted);line-height:1.6}
 .tag{display:inline-block;font-size:10.5px;padding:1px 6px;border-radius:5px;background:#f1f0ec;color:#6b6a65;margin:2px 3px 0 0}
 .tag.sem{background:#eaf7ef;color:#1a7f4b}
+.tag.more{background:transparent;color:var(--dim);padding:1px 2px}
 .bar{height:4px;background:#eceae5;border-radius:2px;overflow:hidden;margin-top:8px}
 .bar i{display:block;height:100%;background:var(--accent);width:0;transition:.25s}
 .ds-box{align-items:center;gap:4px;margin-top:8px}
@@ -79,6 +80,27 @@ button.sm{font-size:12px;padding:5px 10px}
 .ds-box .ti{width:50px;padding:3px 4px;border:1px solid var(--line-2);border-radius:6px;background:#fff;
   color:var(--ink);font:inherit;font-size:12px;text-align:center}
 .pool{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));gap:10px}
+/* ---------- 素材体检 ---------- */
+.health{border:1px solid var(--line);border-radius:10px;background:#fbfbf9;padding:10px 12px;margin-bottom:12px}
+.health .hh{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.health .hh b{font-size:12.5px}
+.health .hh span{font-size:11.5px;color:var(--muted)}
+.hbars{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:2px 16px;margin-top:8px}
+.hbar{display:flex;align-items:center;gap:7px;font-size:11.5px;line-height:1.7}
+.hbar .k{width:46px;color:var(--muted);white-space:nowrap}
+.hbar .t{flex:1;height:6px;border-radius:3px;background:#ecebe6;overflow:hidden}
+.hbar .t u{display:block;height:100%;border-radius:3px;background:#9db4d6}
+.hbar .v{width:66px;text-align:right;font:11px var(--mono);color:var(--dim);white-space:nowrap}
+.hbar.lack .k,.hbar.lack .v{color:var(--bad)}
+.hcaps{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.hcaps .c{font-size:11px;color:#5d5a52;background:#f1f0ec;border:1px solid var(--line);border-radius:999px;padding:1px 8px}
+.hcaps .c b{font-weight:600;color:var(--ink)}
+.hadv{margin:8px 0 0;padding:0;list-style:none;font-size:11.5px;line-height:1.75;color:var(--muted)}
+.hadv li{display:flex;gap:6px}
+.hadv li::before{content:"·";color:var(--dim)}
+.hadv li.bad{color:var(--bad)}
+.hadv li.warn{color:var(--warn)}
+.hadv li.ok{color:var(--ok)}
 .pi{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#fff;position:relative}
 .pi img{width:100%;aspect-ratio:16/10;object-fit:cover;display:block;background:#eae9e4}
 .pi .m{padding:5px 7px 6px}
@@ -90,9 +112,13 @@ button.sm{font-size:12px;padding:5px 10px}
 .script.on{border-color:var(--accent);box-shadow:0 0 0 3px rgba(47,111,235,.07)}
 .script .hd{display:flex;align-items:center;gap:8px;cursor:pointer}
 .script .ttl{font-weight:600;font-size:13.5px}
-.sent{display:grid;grid-template-columns:1fr 150px;gap:8px;margin-top:7px;align-items:start}
+.sent{display:grid;grid-template-columns:1fr 150px 22px;gap:8px;margin-top:7px;align-items:start}
 .sent textarea{font-size:12.5px;min-height:34px;padding:5px 8px}
 .sent input{font-size:11.5px;padding:5px 8px;color:var(--muted)}
+.sent .sx{width:22px;height:34px;padding:0;border:0;border-radius:6px;background:transparent;
+  color:var(--dim);font-size:14px;line-height:1;cursor:pointer;transition:.15s}
+.sent .sx:hover{color:var(--bad);background:#fdf3f2}
+.sent .sx:disabled{opacity:.28;cursor:not-allowed;background:transparent;color:var(--dim)}
 .shots{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
 .shots th{text-align:left;font-weight:500;color:var(--muted);font-size:11px;padding:6px 8px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff;z-index:2}
 .shots td{padding:6px 8px;border-bottom:1px solid #f2f1ed;vertical-align:middle;overflow:hidden;text-overflow:ellipsis}
@@ -131,6 +157,10 @@ button.sm{font-size:12px;padding:5px 10px}
 .empty{text-align:center;padding:36px 20px;color:var(--dim);font-size:13px}
 #toast{position:fixed;left:50%;bottom:36px;transform:translate(-50%,18px);background:#1d1d1b;color:#fff;padding:10px 18px;border-radius:9px;font-size:13px;opacity:0;pointer-events:none;transition:.22s;z-index:99;max-width:80vw}
 #toast.on{opacity:1;transform:translate(-50%,0)}
+#toast.on.act{pointer-events:auto}
+#toast .tact{margin-left:10px;padding:0;border:0;background:none;color:#8ab4ff;font:inherit;
+  text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+#toast .tact:hover{color:#b9d2ff}
 .modal{position:fixed;inset:0;background:rgba(20,20,18,.45);display:none;z-index:60;align-items:center;justify-content:center;padding:20px}
 .modal.on{display:flex}
 .sheet{background:#fff;border-radius:14px;max-width:640px;width:100%;max-height:88vh;overflow:auto;padding:20px 22px}
@@ -206,7 +236,12 @@ body.has-fab main{padding-bottom:76px}
 .navrow button{min-width:132px}
 .navrow button:disabled{opacity:.4;cursor:not-allowed}
 .navrow .hintline{flex:1;text-align:center;align-self:center}
-@media (max-width:900px){.grid2,.grid3{grid-template-columns:1fr}.sent{grid-template-columns:1fr}}
+@media (max-width:900px){
+  .grid2,.grid3{grid-template-columns:1fr}
+  .sent{grid-template-columns:1fr 22px}
+  .sent .sx{grid-column:2;grid-row:1}
+  .sent input{grid-column:1 / -1}
+}
 </style>
 </head>
 <body>
@@ -332,6 +367,12 @@ body.has-fab main{padding-bottom:76px}
       <div class="hintline" id="tag-msg" style="margin-bottom:10px">
         打标先算亮度/色调/细节/运动；配了视觉模型才会加场景、主体这类语义标签，对齐更准。
       </div>
+      <div class="health" id="health" hidden>
+        <div class="hh"><b>素材体检</b><span id="health-meta"></span></div>
+        <div class="hbars" id="health-bars"></div>
+        <div class="hcaps" id="health-caps"></div>
+        <ul class="hadv" id="health-adv"></ul>
+      </div>
       <div class="pool" id="pool"></div>
       <div class="empty" id="pool-empty">素材池是空的，先扫描一个文件夹。</div>
     </div>
@@ -373,7 +414,7 @@ body.has-fab main{padding-bottom:76px}
     </div>
 
     <div class="card" id="scripts-card" hidden>
-      <h2>脚本 <span class="hint">点标题切换当前这条；句子可以直接改，改完自动保存</span></h2>
+      <h2>脚本 <span class="hint">点标题切换当前这条；句子可以直接改，改完自动保存；每句右边的 ✕ 删掉这一句，底部「＋ 补一句」加一句</span></h2>
       <div id="scripts"></div>
     </div>
   </section>
@@ -651,11 +692,25 @@ const S = {
   outs:[], outSel:new Set(), outSort:{key:"mtime", dir:-1}
 };
 const ANGLE_LABEL = {pain:"痛点切入", compare:"对比实测", spec:"参数硬核", avoid:"避坑提醒", scene:"场景代入"};
+// 本地视觉特征打出来的曝光/色彩类标签，选片时几乎没区分度，卡片上排到最后
+const CV_TAGS = new Set(["明亮","偏暗","中间调","暖色调","冷色调","中性色","高饱和","低饱和",
+  "正常饱和","细节丰富","主体突出","中等细节","动态","轻微变化","静止"]);
 
 /* ---------- 工具 ---------- */
-function toast(msg, ms=2400){
-  const t = $("#toast"); t.textContent = msg; t.classList.add("on");
-  clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove("on"), ms);
+function toast(msg, ms=2400, act){
+  const t = $("#toast");
+  t.textContent = "";
+  t.appendChild(document.createTextNode(msg));
+  const hasAct = !!(act && act.on);
+  t.classList.toggle("act", hasAct);
+  if(hasAct){
+    const b = mk("button","tact", act.label || "撤销");
+    b.onclick = ()=>{ t.classList.remove("on","act"); clearTimeout(t._h); act.on(); };
+    t.appendChild(b);
+  }
+  t.classList.add("on");
+  clearTimeout(t._h);
+  t._h = setTimeout(()=>t.classList.remove("on","act"), ms);
 }
 async function api(u, body, _retried){
   const opt = body===undefined ? {} : {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)};
@@ -876,6 +931,39 @@ async function saveCfg(){
 }
 
 /* ---------- ① 素材 ---------- */
+/* 素材体检：景别看够不够撑一条片子。缺全景/中景是打分救不回来的，只能补拍 */
+function renderHealth(h){
+  const box = $("#health");
+  if(!h || !h.total){ box.hidden = true; return; }
+  box.hidden = false;
+  $("#health-meta").textContent = h.total + " 条 · 已打标 " + h.tagged +
+    " · 平均 " + (h.avg_dur || 0).toFixed(1) + " 秒/条";
+
+  const bars = $("#health-bars"); bars.innerHTML = "";
+  (h.shot || []).forEach(r=>{
+    if(r.k === "未标景别" && !r.n) return;
+    const row = mk("div","hbar");
+    if(!r.n || r.k === "未标景别") row.classList.add("lack");
+    row.appendChild(mk("span","k", r.k));
+    const t = mk("div","t"), u = document.createElement("u");
+    u.style.width = r.n ? Math.max(2, r.pct) + "%" : "0%";
+    t.appendChild(u); row.appendChild(t);
+    row.appendChild(mk("span","v", r.n + " 条 " + r.pct + "%"));
+    bars.appendChild(row);
+  });
+
+  const caps = $("#health-caps"); caps.innerHTML = "";
+  (h.top || []).filter(r=> r.n > 0).slice(0, 6).forEach(r=>{
+    const c = mk("span","c");
+    c.appendChild(mk("b", null, r.k));
+    c.appendChild(document.createTextNode(" " + r.pct + "%"));
+    c.title = r.k + "：" + r.n + " 条素材带这个标签";
+    caps.appendChild(c);
+  });
+
+  const adv = $("#health-adv"); adv.innerHTML = "";
+  (h.advice || []).forEach(a=> adv.appendChild(mk("li", a.level || "", a.text)));
+}
 async function loadPool(){
   const r = await api("/api/pipe/pool");
   S.pool = r.items || [];
@@ -904,6 +992,7 @@ async function loadPool(){
   // 池子变了，把已经不存在的 id 从选中集合里剔掉
   const alive = new Set(S.pool.map(x=>x.id));
   [...S.sel].forEach(id=>{ if(!alive.has(id)) S.sel.delete(id); });
+  renderHealth(r.health);
 
   const box = $("#pool"); box.innerHTML = "";
   $("#pool-empty").hidden = S.pool.length > 0;
@@ -913,10 +1002,17 @@ async function loadPool(){
     img.onerror = ()=> img.remove();
     d.appendChild(img);
     const m = mk("div","m");
-    const nm = mk("div","nm", it.name); nm.title = it.path + "  @ " + it.start + "s";
+    const nm = mk("div","nm", it.name);
     m.appendChild(nm);
     m.appendChild(mk("div","du", fmtDur(it.dur || 0) + (it.semantic ? " · 语义" : "")));
-    (it.tags||[]).slice(0,3).forEach(t=> m.appendChild(mk("span","tag" + (it.semantic?" sem":""), t)));
+    // 卡片只放得下几颗：先放语义标签（场景/主体/动作/景别，选片靠它），曝光类放最后
+    const tg = (it.tags||[]);
+    const semT = tg.filter(t=> !CV_TAGS.has(t));
+    const cvT = tg.filter(t=> CV_TAGS.has(t));
+    const show = semT.concat(cvT).slice(0, 5);
+    show.forEach(t=> m.appendChild(mk("span","tag" + (CV_TAGS.has(t) ? "" : " sem"), t)));
+    if(tg.length > show.length) m.appendChild(mk("span","tag more", "+" + (tg.length - show.length)));
+    nm.title = it.path + "  @ " + it.start + "s\n" + tg.join(" · ");
     d.appendChild(m);
 
     if(S.selmode){
@@ -1361,7 +1457,8 @@ function renderScripts(){
     };
     d.appendChild(hd);
     if(on){
-      (s.sentences||[]).forEach((x, si)=>{
+      const sents = s.sentences || [];
+      sents.forEach((x, si)=>{
         const row = mk("div","sent");
         const ta = document.createElement("textarea"); ta.value = x.text; ta.rows = 1;
         ta.oninput = ()=> { x.text = ta.value; ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; };
@@ -1369,13 +1466,22 @@ function renderScripts(){
         const vi = document.createElement("input"); vi.type = "text"; vi.value = x.hint || "";
         vi.placeholder = "画面提示";
         vi.onchange = ()=> { x.hint = vi.value; saveScript(i); };
-        row.appendChild(ta); row.appendChild(vi);
+        const bt = mk("button","sx","✕"); bt.type = "button";
+        bt.title = sents.length > 1 ? ("删掉第 " + (si+1) + " 句") : "至少留一句，删不掉";
+        bt.disabled = sents.length <= 1;
+        bt.onclick = ()=> delSentence(i, si);
+        row.appendChild(ta); row.appendChild(vi); row.appendChild(bt);
         d.appendChild(row);
       });
       const row = mk("div","row"); row.style.marginTop = "10px";
+      const b0 = mk("button","g sm","＋ 补一句");
+      b0.onclick = ()=> addSentence(i);
       const b1 = mk("button","b sm","用这条配音 →");
       b1.onclick = async ()=>{ S.idx = i; await api("/api/pipe/project",{action:"save",id:S.pid,active:i}); go(3); };
-      row.appendChild(b1);
+      const b2 = mk("button","g sm","删掉这条脚本");
+      b2.style.marginLeft = "auto";
+      b2.onclick = ()=> delScript(i);
+      row.appendChild(b0); row.appendChild(b1); row.appendChild(b2);
       d.appendChild(row);
     }
     box.appendChild(d);
@@ -1387,6 +1493,73 @@ function saveScript(i){
   saveTimer = setTimeout(async ()=>{
     await api("/api/pipe/project", {action:"save", id:S.pid, idx:i, script:{sentences:S.project.scripts[i].sentences}});
   }, 700);
+}
+function scriptAt(i){ return (S.project && S.project.scripts && S.project.scripts[i]) || null; }
+/* 句子增删：句子数量一变，这一条已经配的音、已经分的镜就对不上了，一起作废重做 */
+async function saveSentences(i, extra){
+  const s = scriptAt(i); if(!s || !S.pid) return;
+  clearTimeout(saveTimer);   // 别让还在等的那次防抖保存把刚删掉的句子写回去
+  const r = await api("/api/pipe/project",
+    {action:"save", id:S.pid, idx:i, script:Object.assign({sentences:s.sentences}, extra||{})});
+  // 这里不拿返回值覆盖 S.project：界面上正在编辑的句子对象要留在原地，否则改字会丢
+  if(r && r.error) toast(r.error);
+}
+function delSentence(i, si){
+  const s = scriptAt(i); if(!s) return;
+  const sents = s.sentences || [];
+  if(si < 0 || si >= sents.length) return;
+  if(sents.length <= 1){ toast("至少留一句，想整条不要就点「删掉这条脚本」"); return; }
+  const gone = sents[si];
+  const old = {tts:s.tts || null, plan:s.plan || null};
+  const lost = !!(old.tts || old.plan);
+  s.sentences = sents.filter((_, k)=> k !== si);
+  if(lost){ s.tts = null; s.plan = null; }
+  saveSentences(i, lost ? {tts:null, plan:null} : null);
+  renderScripts(); renderTTS(); renderShots();
+  toast((lost ? "已删掉第 " + (si+1) + " 句，这条的配音和分镜跟着作废，要重做"
+              : "已删掉第 " + (si+1) + " 句"), 5000,
+        {label:"撤销", on:()=> undoDelSentence(i, si, gone, old)});
+}
+async function undoDelSentence(i, si, gone, old){
+  const s = scriptAt(i); if(!s) return;
+  const sents = (s.sentences || []).slice();
+  sents.splice(Math.min(si, sents.length), 0, gone);
+  s.sentences = sents;
+  const back = (old && (old.tts || old.plan)) ? {tts:old.tts, plan:old.plan} : null;
+  if(back){ s.tts = old.tts; s.plan = old.plan; }
+  await saveSentences(i, back);
+  renderScripts(); renderTTS(); renderShots();
+  toast("已恢复");
+}
+function addSentence(i){
+  const s = scriptAt(i); if(!s) return;
+  const lost = !!(s.tts || s.plan);
+  s.sentences = (s.sentences || []).concat([{text:"", hint:""}]);
+  if(lost){ s.tts = null; s.plan = null; }
+  saveSentences(i, lost ? {tts:null, plan:null} : null);
+  renderScripts(); renderTTS(); renderShots();
+  const all = ($("#scripts") || document).querySelectorAll(".script.on .sent textarea");
+  const last = all[all.length-1];
+  if(last){ last.focus(); last.scrollIntoView({block:"nearest"}); }
+  toast(lost ? "补了一句，直接写；这条的配音和分镜要重做" : "补了一句，直接写");
+}
+async function delScript(i){
+  const scripts = (S.project && S.project.scripts) || [];
+  if(i < 0 || i >= scripts.length) return;
+  if(scripts.length <= 1){ toast("至少留一条脚本；想换内容就重新生成"); return; }
+  const s = scripts[i];
+  const nm = s.angle_label || ANGLE_LABEL[s.angle] || ("脚本 " + (i+1));
+  if(!confirm("删掉「" + nm + "」这一整条脚本？\n\n这条的配音和分镜记录会一起清掉，删了不能撤销。\n已经合成出来的成片文件还在，要删请到成片列表里删。")) return;
+  const left = scripts.filter((_, k)=> k !== i);
+  let active = S.idx;
+  if(i < S.idx) active = S.idx - 1;
+  active = Math.max(0, Math.min(active, left.length - 1));
+  const r = await api("/api/pipe/project", {action:"save", id:S.pid, active, scripts:left});
+  if(r && r.error){ toast(r.error); return; }
+  if(r && r.project){ S.project = r.project; S.idx = Math.min(r.project.active||0, left.length-1); }
+  else { S.project.scripts = left; S.idx = active; }
+  renderScripts(); renderTTS(); renderShots();
+  toast("已删掉这条脚本，还剩 " + left.length + " 条");
 }
 
 /* ---------- ③ 配音 ---------- */
