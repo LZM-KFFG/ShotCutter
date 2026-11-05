@@ -101,6 +101,22 @@ button.sm{font-size:12px;padding:5px 10px}
 .hadv li.bad{color:var(--bad)}
 .hadv li.warn{color:var(--warn)}
 .hadv li.ok{color:var(--ok)}
+/* ---------- 素材去重 ---------- */
+.ddg{border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:8px;background:#fff}
+.ddg .gh{display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:7px}
+.ddg .gh .rs{font-weight:600;color:var(--ink)}
+.ddg .gh .ex{font-size:11px;color:var(--muted)}
+.ddg .tus{display:flex;gap:8px;flex-wrap:wrap}
+.ddg .tu{width:92px;cursor:pointer;position:relative}
+.ddg .tu img{width:92px;height:58px;object-fit:cover;border-radius:6px;display:block;background:#eae9e4;border:1px solid var(--line)}
+.ddg .tu .cap{font-size:10.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ddg .tu.keep{cursor:default}
+.ddg .tu.keep img{border-color:#8fbfa2;box-shadow:0 0 0 2px rgba(60,150,90,.16)}
+.ddg .tu.keep .cap{color:var(--ok)}
+.ddg .tu.off img{opacity:.42}
+.ddg .tu .ck{position:absolute;top:4px;left:4px;width:15px;height:15px;margin:0;accent-color:var(--accent);cursor:pointer}
+.ddg .tu .kb{position:absolute;top:4px;left:4px;font-size:10px;background:rgba(26,127,75,.92);color:#fff;
+  border-radius:4px;padding:0 4px;line-height:15px}
 .pi{border:1px solid var(--line);border-radius:9px;overflow:hidden;background:#fff;position:relative}
 .pi img{width:100%;aspect-ratio:16/10;object-fit:cover;display:block;background:#eae9e4}
 .pi .m{padding:5px 7px 6px}
@@ -351,6 +367,7 @@ body.has-fab main{padding-bottom:76px}
           <span class="sep"></span>
           <button class="b sm" id="btn-tag" title="给还没打标的素材打标">打标</button>
           <button class="g sm" id="btn-tagall" title="所有素材重新打一遍（会覆盖原标签）">全部重打</button>
+          <button class="g sm" id="btn-dedup" title="找出重复素材：同源区间重叠 / 同一段素材存了多份 / 画面几乎一样">去重</button>
           <button class="g sm" id="btn-clearpool" title="把素材池清空（不动原始视频文件）">清空</button>
         </div>
       </div>
@@ -367,6 +384,8 @@ body.has-fab main{padding-bottom:76px}
       <div class="hintline" id="tag-msg" style="margin-bottom:10px">
         打标先算亮度/色调/细节/运动；配了视觉模型才会加场景、主体这类语义标签，对齐更准。
       </div>
+      <div class="bar" id="dd-bar" style="display:none"><i></i></div>
+      <div class="hintline" id="dd-msg" style="display:none;margin-bottom:10px"></div>
       <div class="health" id="health" hidden>
         <div class="hh"><b>素材体检</b><span id="health-meta"></span></div>
         <div class="hbars" id="health-bars"></div>
@@ -571,6 +590,18 @@ body.has-fab main{padding-bottom:76px}
 
 <div id="toast"></div>
 
+<div class="modal" id="dd">
+  <div class="sheet" style="max-width:720px">
+    <h3>重复素材 <span class="hint" id="dd-sub"></span></h3>
+    <div class="hintline">绿框那条是保留的（已打标、时长更长、更早入库的优先）。取消勾选就不动它；只从素材池移除，不删原始视频文件。</div>
+    <div id="dd-list" style="margin-top:12px"></div>
+    <div class="row" style="margin-top:12px;justify-content:flex-end">
+      <button class="g sm" id="dd-off">先不动</button>
+      <button class="b sm" id="dd-go">移出所选</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="modal">
   <div class="sheet">
     <h3>设置</h3>
@@ -733,8 +764,20 @@ async function api(u, body, _retried){
   }
   return j;
 }
+/* 状态轮询专用：带超时。模型加载时 CPU 被打满，fetch 可能长时间挂住，
+   浏览器同源 6 条连接被占满后整个轮询就永久卡在最后一条文案上。 */
+async function apiQuick(u, ms){
+  const ctl = new AbortController();
+  const t = setTimeout(()=>ctl.abort(), ms || 5000);
+  try{
+    const r = await fetch(u, {signal: ctl.signal, cache: "no-store"});
+    return await r.json().catch(()=>({error:"返回不是 JSON"}));
+  }catch(e){
+    return {error: e && e.name === "AbortError" ? "状态请求超时" : ("连不上本地服务：" + e.message)};
+  }finally{ clearTimeout(t); }
+}
 /* ---------- 长任务控制条（打标 / 去字幕 / 批量出片） ---------- */
-const JC_KINDS = {tag:"打标", desub:"去字幕", batch:"批量出片", scan:"扫描素材", script:"写脚本", tts:"配音", compose:"合成"};
+const JC_KINDS = {tag:"打标", desub:"去字幕", batch:"批量出片", scan:"扫描素材", script:"写脚本", tts:"配音", compose:"合成", dedup:"素材去重"};
 let JCID = null, JCPAUSE = false;
 function jcPaint(j){
   $("#jc-kind").textContent = JC_KINDS[j.kind] || "任务";
@@ -1289,6 +1332,100 @@ async function doTag(force){
   $("#tag-msg").textContent = j.state === "error" ? ("打标失败：" + j.error) : (j.message + (j.warn ? "　⚠ " + j.warn[0] : ""));
   loadPool();
 }
+/* ---------- 素材去重 ---------- */
+/* 只出报告、不自动删：同一段素材留哪条见仁见智，让人看一眼缩略图再决定 */
+let DEDUP = null;
+async function doDedup(){
+  if(S.pool.length < 2){ toast("素材少于 2 条，不用去重"); return; }
+  const btn = $("#btn-dedup"), msg = $("#dd-msg");
+  btn.disabled = true;
+  $("#dd-bar").style.display = "";
+  msg.style.display = ""; msg.textContent = "开始比对画面…";
+  const r = await api("/api/pipe/pool/dedup", {});
+  if(r.error || !r.job){
+    $("#dd-bar").style.display = "none"; btn.disabled = false;
+    msg.textContent = r.error || r.message || "去重没起来";
+    return;
+  }
+  const j = await pollJob(r.job, jj=>{ bar($("#dd-bar"), jj.progress||0); msg.textContent = jj.message || ""; });
+  $("#dd-bar").style.display = "none";
+  btn.disabled = false;
+  if(j.state === "error"){ msg.textContent = "去重失败：" + j.error; toast(msg.textContent); return; }
+  msg.textContent = j.message || "";
+  DEDUP = j.dedup || null;
+  if(!DEDUP || !DEDUP.dup_count){ toast("没发现重复素材"); return; }
+  renderDedup();
+  $("#dd").classList.add("on");
+}
+function thumbCell(it, isKeep, g, di){
+  const t = mk("div","tu" + (isKeep ? " keep" : ""));
+  const img = mk("img"); img.loading = "lazy"; img.src = "/api/pipe/thumb?id=" + it.id;
+  img.onerror = ()=> img.remove();
+  t.appendChild(img);
+  const cap = mk("div","cap", it.name + " · " + fmtDur(it.dur));
+  cap.title = it.file + (it.tags.length ? "  " + it.tags.join(" · ") : "");
+  if(isKeep){
+    t.appendChild(mk("span","kb","保留"));
+  }else{
+    const cb = mk("input","ck"); cb.type = "checkbox"; cb.checked = !g.dupes[di].off;
+    const flip = ()=>{ g.dupes[di].off = !cb.checked; t.classList.toggle("off", !cb.checked); updateDdGo(); };
+    cb.onclick = ev=>{ ev.stopPropagation(); flip(); };
+    t.appendChild(cb);
+    t.classList.toggle("off", !!g.dupes[di].off);
+    t.onclick = ()=>{ cb.checked = !cb.checked; flip(); };
+  }
+  t.appendChild(cap);
+  return t;
+}
+function renderDedup(){
+  const box = $("#dd-list"); box.innerHTML = "";
+  $("#dd-sub").textContent = DEDUP.groups.length + " 组 · 重复 " + DEDUP.dup_count +
+    " 条 · 可省 " + (DEDUP.saved||0).toFixed(1) + " 秒";
+  DEDUP.groups.forEach(g=>{
+    const d = mk("div","ddg");
+    const hd = mk("div","gh");
+    hd.appendChild(mk("span","rs", g.reason));
+    hd.appendChild(mk("span","ex", "去掉 " + g.dupes.length + " 条、留 1 条" +
+      (g.reason === "画面近似" ? "（画面差异 " + g.dist + "/256）" : "")));
+    d.appendChild(hd);
+    const tus = mk("div","tus");
+    tus.appendChild(thumbCell(g.keep, true, g, -1));
+    g.dupes.forEach((x, di)=> tus.appendChild(thumbCell(x, false, g, di)));
+    d.appendChild(tus);
+    box.appendChild(d);
+  });
+  updateDdGo();
+}
+function ddPicked(){
+  const out = [];
+  (DEDUP ? DEDUP.groups : []).forEach(g=> (g.dupes||[]).forEach(x=>{ if(!x.off) out.push(x.id); }));
+  return out;
+}
+function updateDdGo(){
+  const n = ddPicked().length;
+  $("#dd-go").textContent = n ? ("移出所选 " + n + " 条") : "移出所选";
+  $("#dd-go").disabled = !n;
+}
+$("#btn-dedup").onclick = ()=> doDedup();
+$("#dd-off").onclick = ()=> $("#dd").classList.remove("on");
+$("#dd").onclick = e=>{ if(e.target.id === "dd") $("#dd").classList.remove("on"); };
+$("#dd-go").onclick = async ()=>{
+  const ids = ddPicked();
+  if(!ids.length) return;
+  const set = new Set(ids);
+  const back = S.pool.filter(x=> set.has(x.id));   // 撤销时按原记录放回
+  $("#dd-go").disabled = true;
+  const r = await api("/api/pipe/pool/drop", {ids});
+  $("#dd").classList.remove("on");
+  await loadPool();
+  toast("已移出 " + (r.removed || ids.length) + " 条重复（文件没删）", 9000, {
+    label:"撤销", on: async ()=>{
+      await api("/api/pipe/pool/restore", {items: back});
+      await loadPool(); toast("已放回 " + back.length + " 条");
+    }
+  });
+};
+
 $("#btn-clearpool").onclick = async ()=>{
   if(!confirm("清空素材池？（不会删原始文件）")) return;
   await api("/api/pipe/pool/clear", {});
@@ -2355,9 +2492,16 @@ $$("#presets button").forEach(b=>{
 let lPoll = null;
 async function refreshLstat(){
   let r;
-  try{ r = await api("/api/pipe/llm/status"); }catch(e){ return null; }
+  try{ r = await apiQuick("/api/pipe/llm/status", 5000); }catch(e){ return null; }
   const el = $("#lstat"), tail = $("#ltail");
-  if(!el || !r || r.error) return r;
+  if(!el || !r) return r;
+  if(r.error){
+    // 不能停在旧的"加载中"上：标明在重试，并保证轮询还活着
+    el.textContent = "状态查询超时，正在重试…";
+    el.style.color = "var(--muted)";
+    if(!lPoll) startPoll();
+    return r;
+  }
   if(r.ready){
     el.textContent = "已就绪 · 端口 " + r.port + (r.model ? " · " + shortModel(r.model) : "")
                    + (r.vision ? " · 能看图" : " · 只能读文字");
@@ -2366,8 +2510,9 @@ async function refreshLstat(){
     if(lPoll){ clearInterval(lPoll); lPoll = null; }
     fillLocal(r);
   }else if(r.alive){
-    el.textContent = "加载中 " + Math.round(r.elapsed) + "s（首次 30~60 秒，别关这个窗口）";
+    el.textContent = "加载中 " + Math.round(r.elapsed) + "s（首次 3~6 分钟，30B 模型较慢，别关这个窗口）";
     el.style.color = "var(--muted)";
+    if(!lPoll) startPoll();          // 关掉页面再打开时也能自己接上
   }else if(r.exit !== undefined && r.exit !== null){
     el.textContent = "启动失败（退出码 " + r.exit + "）";
     el.style.color = "var(--bad)";
@@ -2407,7 +2552,7 @@ $("#btn-lstart").onclick = async ()=>{
   if(r.error){ fail(r.error); return; }
   if(r.already){ toast("本地模型本来就在跑"); refreshLstat(); return; }
   if(r.state === "ready"){ toast(r.note || "本地模型已就绪"); refreshLstat(); return; }
-  toast(r.note || "正在加载模型，首次约 30~60 秒");
+  toast(r.note || "正在加载模型，首次约 3~6 分钟（30B 模型较慢）");
   startPoll();
 };
 $("#btn-lstop").onclick = async ()=>{

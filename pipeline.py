@@ -802,6 +802,23 @@ def pool_drop_many(ids) -> int:
     return n
 
 
+def pool_restore(items: list) -> int:
+    """把移出素材池的记录放回去（撤销误删 / 去掉重）。已有的不覆盖，文件不在的跳过。"""
+    pool = _pool_load()
+    n = 0
+    for it in items or []:
+        if not isinstance(it, dict):
+            continue
+        pid = it.get("id")
+        if not pid or pid in pool["items"] or not Path(it.get("path") or "").exists():
+            continue
+        pool["items"][pid] = it
+        n += 1
+    if n:
+        _pool_save(pool)
+    return n
+
+
 def pool_health(items: list[dict] | None = None) -> dict:
     """素材体检：看景别和画面大类够不够撑一条片子。
 
@@ -865,6 +882,198 @@ def pool_health(items: list[dict] | None = None) -> dict:
     if not adv:
         adv.append({"level": "ok", "text": "景别和画面大类都够用，可以直接出片。"})
     return out
+
+
+# ---------------------------------------------------------------- 素材去重
+
+DEDUP_BITS = 16        # 结构指纹分辨率：16×16 的横向梯度符号 → 256 位
+DEDUP_NEAR = 12        # 允许 12/256 位不同（≈5%）；再松就会把不同镜头误判成同一条
+DEDUP_COLOR = 32.0     # 平均色差（0~255）。纯色/黑场靠结构位分不开，用颜色兜一道
+DEDUP_OVERLAP = 0.85   # 同一视频里，短区间被长区间盖住超过这个比例就算重复
+
+
+def _dedup_fp(item: dict) -> dict | None:
+    """算一个素材的画面指纹：2 帧结构哈希 + 平均色。
+
+    16×16 的梯度比 8×8 稳：同一条素材转码、轻微调色后仍然对得上，
+    而不同镜头（哪怕都是"厨房特写"）基本不会撞。
+    指纹回存到素材记录里，重跑去重不用再抽帧。
+    """
+    try:
+        import cv2
+        import numpy as np
+    except Exception:
+        return None
+    hs, cs = [], []
+    for p in grab_frames(item, 2, width=160, prefix="h"):
+        im = cv2.imread(str(p))
+        if im is None:
+            continue
+        g = cv2.cvtColor(im, cv2.COLOR_BGR2GRAY)
+        g = cv2.resize(g, (DEDUP_BITS + 1, DEDUP_BITS), interpolation=cv2.INTER_AREA)
+        bits = np.packbits((g[:, 1:] > g[:, :-1]).reshape(-1))
+        hs.append(bits.tobytes().hex())
+        cs.append([int(x) for x in cv2.mean(im)[:3]])
+    if not hs:
+        return None
+    return {"v": 1, "h": hs, "c": cs}
+
+
+def _fp_dist(a: dict, b: dict) -> tuple[int, float]:
+    """两张指纹的差异：(结构位不同的个数, 平均色差)。两帧取平均，
+    单帧对不上（片段内部有变化）不至于直接判成两个镜头。"""
+    n = min(len(a["h"]), len(b["h"]))
+    if n <= 0:
+        return 999, 999.0
+    ham = sum(bin(int(a["h"][i], 16) ^ int(b["h"][i], 16)).count("1") for i in range(n)) / n
+    col = sum(sum(abs(x - y) for x, y in zip(a["c"][i], b["c"][i])) / 3.0
+              for i in range(min(len(a["c"]), len(b["c"])))) / max(1, min(len(a["c"]), len(b["c"])))
+    return int(round(ham)), round(col, 1)
+
+
+def _keep_rank(it: dict) -> tuple:
+    """一组重复里留哪条：已打标且有语义标签 > 已打标 > 更长 > 更早入库。"""
+    return (1 if it.get("tagged") else 0,
+            1 if _scene_tags(it) else 0,
+            round(float(it.get("dur") or 0), 1),
+            -float(it.get("added") or 0))
+
+
+def _brief(it: dict) -> dict:
+    return {"id": it["id"], "name": it.get("name") or Path(it["path"]).name,
+            "dur": round(float(it.get("dur") or 0), 1),
+            "start": round(float(it.get("start") or 0), 1),
+            "file": Path(it["path"]).name,
+            "tags": [t for t in (it.get("tags") or []) if t not in CV_LABELS][:4]}
+
+
+def pool_dedup(items: list[dict] | None = None, job: dict | None = None) -> dict:
+    """找重复素材，只出报告不改数据；真正移出由前端的「移出」按钮调 pool_drop_many。
+
+    三类重复：
+      1) 同源重叠——同一个视频的切片区间互相盖住（手动切片 / 去字幕复用最多）
+      2) 重复文件——同一段素材在库里存了两份（不同路径、画面完全一致）
+      3) 画面近似——重拍或近似镜头，结构指纹够近就算一组
+    """
+    pool = _pool_load()
+    items = [it for it in (items if items is not None else pool["items"].values())
+             if Path(it.get("path") or "").exists()]
+    total = len(items)
+    out = {"checked": total, "groups": [], "dup_count": 0, "saved": 0.0, "no_fp": 0}
+    if total < 2:
+        return out
+
+    # 1) 指纹（已有缓存直接用）
+    dirty = False
+    for i, it in enumerate(items):
+        if job:
+            job_gate(job)
+            job["done"] = i + 1
+            job["progress"] = 0.85 * (i + 1) / total
+            job["message"] = "算画面指纹 %d/%d  %s" % (i + 1, total, (it.get("name") or "")[:22])
+        fp = it.get("fp")
+        if not (isinstance(fp, dict) and fp.get("v") == 1 and fp.get("h")):
+            fp = _dedup_fp(it)
+            if fp:
+                it["fp"] = fp
+                dirty = True
+            elif "fp" in it:
+                it.pop("fp", None)
+                dirty = True
+        if not fp:
+            out["no_fp"] += 1
+
+    # 2) 先按「同一文件的时间区间重叠」分组，剩下的再按画面比
+    groups: list[dict] = []          # {"keep": item, "dupes": [item], "reason": str, "dist": int}
+    taken: set[str] = set()
+    ordered = sorted(items, key=_keep_rank, reverse=True)
+
+    by_path: dict[str, list[dict]] = {}
+    for it in ordered:
+        try:
+            by_path.setdefault(str(Path(it["path"]).resolve()), []).append(it)
+        except OSError:
+            continue
+    for same in by_path.values():
+        if len(same) < 2:
+            continue
+        for idx, keep in enumerate(same):
+            if keep["id"] in taken:
+                continue
+            for other in same[idx + 1:]:
+                if other["id"] in taken or other["id"] == keep["id"]:
+                    continue
+                ov = min(float(keep["end"]), float(other["end"])) - max(float(keep["start"]), float(other["start"]))
+                short = min(float(keep.get("dur") or 0), float(other.get("dur") or 0)) or 0.01
+                if ov > 0.15 and ov >= DEDUP_OVERLAP * short:
+                    taken.add(other["id"])
+                    g = next((x for x in groups if x["keep"] is keep), None)
+                    if g is None:
+                        g = {"keep": keep, "dupes": [], "reason": "同源重叠", "dist": 0}
+                        groups.append(g)
+                    g["dupes"].append(other)
+
+    kept_fp: list[dict] = []
+    for it in ordered:
+        if it["id"] in taken or not it.get("fp"):
+            continue
+        hit = None
+        for k in kept_fp:
+            if k["keep"]["id"] in taken:
+                continue
+            ham, col = _fp_dist(it["fp"], k["keep"]["fp"])
+            ok = ham <= (DEDUP_NEAR + 4 if len(it["fp"]["h"]) < 2 or len(k["keep"]["fp"]["h"]) < 2 else DEDUP_NEAR)
+            if ok and col <= DEDUP_COLOR:
+                hit = (k, ham, col)
+                break
+        if hit:
+            k, ham, col = hit
+            taken.add(it["id"])
+            same_file = (str(Path(it["path"]).resolve()) == str(Path(k["keep"]["path"]).resolve()))
+            k["dupes"].append(it)
+            if ham == 0 and not same_file:
+                k["reason"] = "重复文件"
+            elif not k.get("reason"):
+                k["reason"] = "画面近似"
+            k["dist"] = min(k.get("dist") or 99, ham)
+            k["color"] = min(k.get("color") or 99, col)
+        else:
+            kept_fp.append({"keep": it, "dupes": [], "reason": "", "dist": 0})
+
+    # 3) 整理输出（同源重叠的组和画面近似的组合在一起）
+    for g in groups + kept_fp:
+        if not g["dupes"]:
+            continue
+        if not g.get("reason"):
+            g["reason"] = "画面近似"
+        out["groups"].append({
+            "reason": g["reason"], "dist": g.get("dist") or 0, "color": g.get("color") or 0,
+            "keep": _brief(g["keep"]),
+            "dupes": [_brief(x) for x in g["dupes"]],
+        })
+        out["dup_count"] += len(g["dupes"])
+        out["saved"] = round(out["saved"] + sum(float(x.get("dur") or 0) for x in g["dupes"]), 1)
+    out["groups"].sort(key=lambda g: -len(g["dupes"]))
+    out["saved"] = round(out["saved"], 1)
+
+    if dirty:
+        _pool_save(pool)
+    return out
+
+
+def dedup_worker(items: list[dict], job: dict) -> None:
+    """去重任务体：结果挂在 job["dedup"] 上给前端画报告。"""
+    job["message"] = "开始对比 %d 条素材…" % len(items)
+    res = pool_dedup(items, job)
+    job["dedup"] = res
+    n = res.get("dup_count") or 0
+    job["progress"] = 1.0
+    if res.get("no_fp") and res["no_fp"] >= len(items):
+        job["message"] = "抽帧失败了，画面没法比——检查 ffmpeg 是否可用"
+    elif n:
+        job["message"] = "找到 %d 条重复（可省 %.1fs 时长）" % (n, res.get("saved") or 0)
+    else:
+        job["message"] = "没有发现重复素材"
 
 
 # ---------------------------------------------------------------- 删除（走回收站）

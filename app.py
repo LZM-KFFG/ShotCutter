@@ -1035,6 +1035,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "models": pipe.list_models(base, refresh=True)})
         elif u.path == "/api/pipe/pool":
             items = pipe.pool_list()
+            for it in items:               # 画面指纹只给去重用，别塞进列表响应
+                it.pop("fp", None)
             self._json({
                 "ok": True, "items": items, "count": len(items),
                 "tagged": sum(1 for i in items if i.get("tagged")),
@@ -1506,6 +1508,21 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": str(exc)}, 400)
                 return
             self._json(res)
+            return
+
+        if u.path == "/api/pipe/pool/restore":
+            self._json({"ok": True, "restored": pipe.pool_restore(payload.get("items") or [])})
+            return
+
+        if u.path == "/api/pipe/pool/dedup":
+            items = pipe.pool_list()
+            if len(items) < 2:
+                self._json({"ok": True, "job": None, "message": "素材不足 2 条，不用去重"})
+                return
+            job = new_job("dedup", len(items))
+            threading.Thread(target=_run_job, args=(job, pipe.dedup_worker, items, job),
+                             daemon=True).start()
+            self._json({"ok": True, "job": job["id"], "count": len(items)})
             return
 
         if u.path == "/api/pipe/pool/clear":
