@@ -396,7 +396,8 @@ def default_out_dir(video: dict) -> str:
     return str(src.parent / "镜头切片" / safe_stem(video["name"]))
 
 
-def export_one(video: dict, keep: list[int], out_dir: Path, mode: str, job: dict, base: int, total: int) -> None:
+def export_one(video: dict, keep: list[int], out_dir: Path, mode: str, job: dict, base: int, total: int,
+               p_from: float = 0.0) -> None:
     src = video["path"]
     ext = Path(src).suffix.lower() or ".mp4"
     if ext not in {".mp4", ".mkv", ".mov", ".webm"}:
@@ -421,13 +422,34 @@ def export_one(video: dict, keep: list[int], out_dir: Path, mode: str, job: dict
             job["files"].append({"path": str(out), "ok": True,
                                  "size": out.stat().st_size if out.exists() else 0})
         job["done"] = base + n + 1
-        job["progress"] = job["done"] / max(1, total)
+        job["progress"] = p_from + (1 - p_from) * job["done"] / max(1, total)
         job["message"] = f"导出中 {job['done']}/{total}"
 
 
-def export_worker(items: list[dict], mode: str, out_dir: str | None, job: dict) -> None:
+def export_worker(items: list[dict], mode: str, out_dir: str | None, job: dict,
+                  dedup: str | None = None) -> None:
     try:
         total = sum(len(it.get("keep", [])) for it in items)
+        p_from = 0.0
+        if dedup:
+            job["message"] = "去重预检：抽帧算指纹…"
+            try:
+                report, kept = dedup_clips(items, dedup, job)
+                items = [{"token": it["token"],
+                          "keep": [i for i in it.get("keep", [])
+                                   if (it["token"], int(i)) in kept]}
+                         for it in items]
+                total = sum(len(it["keep"]) for it in items)
+                report["after"] = total
+                job["dedup"] = report
+                p_from = 0.5
+                if not total:
+                    job["state"] = "error"
+                    job["error"] = "去重后没有可导出的片段"
+                    job["message"] = "去重后没有可导出的片段"
+                    return
+            except Exception as exc:  # noqa: BLE001
+                job["dedup"] = {"error": f"{type(exc).__name__}: {exc}", "skipped": []}
         base = 0
         for it in items:
             video = VIDEOS.get(it.get("token", ""))
@@ -436,18 +458,169 @@ def export_worker(items: list[dict], mode: str, out_dir: str | None, job: dict) 
                 continue
             target = Path(out_dir) if out_dir else Path(default_out_dir(video))
             try:
-                export_one(video, keep, target, mode, job, base, total)
+                export_one(video, keep, target, mode, job, base, total, p_from)
             except Exception as exc:  # noqa: BLE001
                 job["files"].append({"path": "", "ok": False, "error": f"{type(exc).__name__}: {exc}"})
             base += len(keep)
         job["state"] = "done"
         ok = sum(1 for f in job["files"] if f["ok"])
-        job["message"] = f"导出完成：{ok} 个文件"
+        skipped = len((job.get("dedup") or {}).get("skipped") or [])
+        job["message"] = (f"导出完成：{ok} 个文件" + (f"（去重跳过 {skipped} 段）" if skipped else ""))
     except Exception as exc:  # noqa: BLE001
         job["state"] = "error"
         job["error"] = str(exc)
     finally:
         job["elapsed"] = round(time.time() - job["t0"], 1)
+
+
+# ---------------------------------------------------------------- 导出前去重
+
+CLIP_FP = WORK / "clipfp"
+# 去重强度：(结构位容差 /256, 平均色差 0~255)。数字越小越保守，留下的越多
+DEDUP_LEVELS = {
+    "conservative": (6, 24.0),
+    "normal": (12, 32.0),
+    "aggressive": (20, 44.0),
+}
+DEDUP_OVERLAP = 0.85   # 同一视频里短片段被长片段盖住超过这个比例即算重复
+
+
+def _clip_frames(video: dict, sc: dict) -> list[Path]:
+    """抽片段内的两帧小图（28% / 74% 处），落在本地缓存里，重跑去重不用再抽。"""
+    raw = f"{video['path']}|{sc['start']:.3f}|{sc['end']:.3f}|{video.get('size')}"
+    base = CLIP_FP / hashlib.md5(raw.encode("utf-8")).hexdigest()[:20]
+    base.mkdir(parents=True, exist_ok=True)
+    dur = max(0.05, float(sc["dur"]))
+    outs: list[Path] = []
+    for i, ratio in enumerate((0.28, 0.74)):
+        dst = base / f"c{i}.jpg"
+        # 只按「文件有内容」判断：纯色/暗场画面压出来只有 300 来字节，
+        # 用几百字节的阈值会把合法的黑场帧当成抽帧失败。
+        if not (dst.exists() and dst.stat().st_size >= 150):
+            cmd = [FFMPEG, "-v", "error", "-y",
+                   "-ss", f"{float(sc['start']) + dur * ratio:.3f}", "-i", video["path"],
+                   "-frames:v", "1", "-vf", "scale=160:-2", "-q:v", "4", str(dst)]
+            try:
+                subprocess.run(cmd, capture_output=True, timeout=120, creationflags=NO_WINDOW)
+            except Exception:  # noqa: BLE001
+                pass
+        if dst.exists() and dst.stat().st_size >= 150:
+            outs.append(dst)
+    return outs
+
+
+def dedup_clips(items: list[dict], level: str = "normal",
+                job: dict | None = None) -> tuple[dict, set]:
+    """导出前的片段去重：返回（报告, 要保留的 (token, 片段序号) 集合）。
+
+    两层判断：
+      1) 同源重叠——同一个视频里两段区间互相盖住，直接算重复（不抽帧，零成本）
+      2) 画面近似——抽两帧算 dHash + 平均色，够近就算同一段（同一条素材重拍/重切）
+    每组留代表项：时长更长 > 起点更早（长的通常更完整，短的往往是它的子区间）。
+    """
+    clips: list[dict] = []
+    for it in items:
+        video = VIDEOS.get(it.get("token", ""))
+        if not video:
+            continue
+        scenes = video.get("scenes") or []
+        for idx in it.get("keep", []):
+            if not isinstance(idx, (int, float)):
+                continue
+            idx = int(idx)
+            if not (0 <= idx < len(scenes)):
+                continue
+            sc = scenes[idx]
+            clips.append({"token": it["token"], "idx": idx, "video": video, "sc": sc,
+                          "start": float(sc["start"]), "end": float(sc["end"]),
+                          "dur": float(sc["dur"]),
+                          "name": f"{safe_stem(video['name'])}_{sc['i']:03d}"})
+
+    out = {"level": level, "before": len(clips), "after": len(clips),
+           "skipped": [], "saved": 0.0, "no_fp": 0}
+    if len(clips) < 2:
+        return out, {(c["token"], c["idx"]) for c in clips}
+
+    alive = [True] * len(clips)
+    ordered = sorted(range(len(clips)), key=lambda k: (-clips[k]["dur"], clips[k]["start"]))
+
+    def _drop(dup: int, keeper: int, reason: str, dist: int) -> None:
+        alive[dup] = False
+        out["skipped"].append({"name": clips[dup]["name"], "keep": clips[keeper]["name"],
+                               "reason": reason, "dist": dist, "dur": clips[dup]["dur"]})
+        out["saved"] += clips[dup]["dur"]
+
+    # 1) 同源区间重叠
+    for pos, a in enumerate(ordered):
+        if not alive[a]:
+            continue
+        for b in ordered[pos + 1:]:
+            if not alive[b]:
+                continue
+            if clips[b]["token"] != clips[a]["token"]:
+                continue
+            ov = min(clips[a]["end"], clips[b]["end"]) - max(clips[a]["start"], clips[b]["start"])
+            short = min(clips[a]["dur"], clips[b]["dur"]) or 0.01
+            if ov > 0.15 and ov >= DEDUP_OVERLAP * short:
+                _drop(b, a, "同源重叠", 0)
+
+    # 2) 画面近似
+    tol_bits, tol_col = DEDUP_LEVELS.get(level, DEDUP_LEVELS["normal"])
+    live = [k for k in ordered if alive[k]]
+    fps: dict[int, dict] = {}
+    for n, k in enumerate(live):
+        if job:
+            job["progress"] = 0.45 * (n + 1) / max(1, len(live))
+            job["message"] = f"去重预检：抽帧比对 {n + 1}/{len(live)}　{clips[k]['name']}"
+        fp = pipe.fp_from_frames(_clip_frames(clips[k]["video"], clips[k]["sc"]))
+        if fp:
+            fps[k] = fp
+        else:
+            out["no_fp"] += 1
+
+    keepers: list[int] = []
+    flat: dict[int, bool] = {}
+
+    def _is_flat(k: int) -> bool:
+        """纯色 / 暗场：梯度位几乎没有起伏，结构指纹等于没信息，只能靠颜色判。"""
+        if k not in flat:
+            ones = sum(bin(int(h, 16)).count("1") for h in fps[k]["h"])
+            total = sum(len(h) * 4 for h in fps[k]["h"]) or 1
+            ratio = ones / total
+            flat[k] = ratio < 0.02 or ratio > 0.98
+        return flat[k]
+
+    for k in live:
+        hit = None
+        if k in fps:
+            for m in keepers:
+                if m not in fps:
+                    continue
+                ham, col = pipe.fp_dist(fps[k], fps[m])
+                if ham > tol_bits or col > tol_col:
+                    continue
+                # 两边都没有结构可比时，颜色必须几乎一样才算重复
+                if (_is_flat(k) or _is_flat(m)) and col > 10:
+                    continue
+                hit = (m, ham)
+                break
+        if hit:
+            same_file = str(Path(clips[k]["video"]["path"]).resolve()) == \
+                str(Path(clips[hit[0]]["video"]["path"]).resolve())
+            _drop(k, hit[0], "完全一致" if hit[1] == 0 else "画面近似", hit[1])
+            if hit[1] == 0 and not same_file:
+                out["skipped"][-1]["reason"] = "重复文件"
+        else:
+            keepers.append(k)
+
+    out["after"] = sum(1 for x in alive if x)
+    out["saved"] = round(out["saved"], 1)
+    if job:
+        job["progress"] = 0.5
+        job["message"] = (f"去重：{out['before']} 段 → {out['after']} 段"
+                          if out["skipped"] else "去重：没有发现重复片段")
+    kept = {(clips[k]["token"], clips[k]["idx"]) for k in range(len(clips)) if alive[k]}
+    return out, kept
 
 
 def edl_timecode(frames: int, fps: float) -> str:
@@ -1235,8 +1408,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "没有选中任何片段"}, 400)
                 return
             job = new_job("export", total)
+            dedup = payload.get("dedup") or None
+            if dedup not in DEDUP_LEVELS:
+                dedup = None
             threading.Thread(target=export_worker,
-                             args=(items, payload.get("mode", "copy"), payload.get("out_dir"), job),
+                             args=(items, payload.get("mode", "copy"), payload.get("out_dir"), job, dedup),
                              daemon=True).start()
             self._json({"ok": True, "job": job["id"]})
             return

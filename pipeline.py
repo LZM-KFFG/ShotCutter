@@ -892,12 +892,12 @@ DEDUP_COLOR = 32.0     # 平均色差（0~255）。纯色/黑场靠结构位分�
 DEDUP_OVERLAP = 0.85   # 同一视频里，短区间被长区间盖住超过这个比例就算重复
 
 
-def _dedup_fp(item: dict) -> dict | None:
-    """算一个素材的画面指纹：2 帧结构哈希 + 平均色。
+def fp_from_frames(paths: list[Path]) -> dict | None:
+    """由若干帧图算画面指纹：每帧 16×16 梯度符号（256 位）+ 平均 BGR。
 
-    16×16 的梯度比 8×8 稳：同一条素材转码、轻微调色后仍然对得上，
+    16×16 的梯度比 8×8 稳：同一段画面转码、轻微调色后仍然对得上，
     而不同镜头（哪怕都是"厨房特写"）基本不会撞。
-    指纹回存到素材记录里，重跑去重不用再抽帧。
+    镜头切割器导出前的去重也复用它，保证两边判重口径一致。
     """
     try:
         import cv2
@@ -905,7 +905,7 @@ def _dedup_fp(item: dict) -> dict | None:
     except Exception:
         return None
     hs, cs = [], []
-    for p in grab_frames(item, 2, width=160, prefix="h"):
+    for p in paths:
         im = cv2.imread(str(p))
         if im is None:
             continue
@@ -917,6 +917,16 @@ def _dedup_fp(item: dict) -> dict | None:
     if not hs:
         return None
     return {"v": 1, "h": hs, "c": cs}
+
+
+def _dedup_fp(item: dict) -> dict | None:
+    """算一个素材的画面指纹；指纹回存到素材记录里，重跑去重不用再抽帧。"""
+    return fp_from_frames(grab_frames(item, 2, width=160, prefix="h"))
+
+
+def fp_dist(a: dict, b: dict) -> tuple[int, float]:
+    """公开版指纹距离，给 app 侧导出前去重用。"""
+    return _fp_dist(a, b)
 
 
 def _fp_dist(a: dict, b: dict) -> tuple[int, float]:
@@ -1796,8 +1806,10 @@ def start_local() -> dict:
         if not info["ok"]:
             return {"ok": False, "port": port,
                     "error": "没找到 llama-server.exe 或 .gguf 模型。请在下面填 llama.cpp 目录（如 D:\\llama.cpp）"}
+        # 不传 --no-webui：llama-server 默认就带内置对话界面，浏览器打开
+        # http://127.0.0.1:<端口> 就能直接聊；传了 --no-webui 根路径会 404
         base = [info["exe"], "-m", info["model"],
-                "--port", str(port), "--host", "127.0.0.1", "--no-webui"]
+                "--port", str(port), "--host", "127.0.0.1"]
         extra = _split_args(info["extra"])
         if not any(a in ("--parallel", "-np") or a.startswith("--parallel=") or a.startswith("-np=")
                        for a in extra):

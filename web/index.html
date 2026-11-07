@@ -14,6 +14,7 @@
     --sans:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
   }
   *{box-sizing:border-box}
+  [hidden]{display:none!important}
   html,body{margin:0;height:100%}
   body{background:var(--bg);color:var(--ink);font:14px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
   button{font-family:inherit;font-size:13px;cursor:pointer;user-select:none;-webkit-user-select:none;-webkit-user-drag:none}
@@ -157,6 +158,22 @@
   .result h4{margin:0 0 8px;font-size:13px;font-weight:500}
   .result ul{margin:0;padding-left:16px;font-size:12px;color:var(--muted);max-height:140px;overflow:auto}
   .result li{font-family:var(--mono);font-size:11px;word-break:break-all}
+  .chkline{display:flex;gap:8px;align-items:flex-start;margin-top:11px;padding-top:11px;
+    border-top:1px dashed var(--line);cursor:pointer}
+  .chkline input{margin:2px 0 0;accent-color:var(--accent);width:14px;height:14px;flex:none}
+  .chkline span{font-size:12.5px;color:var(--ink)}
+  .chkline em{display:block;font-style:normal;font-size:11px;color:var(--faint);margin-top:1px}
+  .seg.sml{margin-top:8px}
+  .seg.sml button{font-size:11.5px;padding:4px 2px}
+  .dd{margin-top:12px;padding-top:11px;border-top:1px dashed var(--line);font-size:12px;color:var(--muted)}
+  .dd-h{color:var(--ink)}
+  .dd-h b{font-weight:500}
+  .dd details{margin-top:6px}
+  .dd summary{cursor:pointer;font-size:11.5px;color:var(--accent);outline:none}
+  .dd ul{max-height:150px;overflow:auto;margin:6px 0 0;padding-left:16px}
+  .dd li{font-family:var(--mono);font-size:11px;word-break:break-all}
+  .dd li i{font-style:normal;color:var(--faint)}
+  .dd .warn{color:var(--warn);margin-top:6px}
   @media (max-width:980px){main{grid-template-columns:1fr}.panel{position:static}}
 </style>
 </head>
@@ -203,6 +220,16 @@
         <button data-m="recode">逐帧精确</button>
       </div>
       <div class="tiny" id="mode-hint">不重新编码，几秒完成、画质零损失；切点对齐关键帧，起点可能偏移 0.5~2 秒。</div>
+      <label class="chkline" for="dedup">
+        <input type="checkbox" id="dedup">
+        <span>去重后导出<em>重复的镜头只导一条，省一次人工挑</em></span>
+      </label>
+      <div class="seg sml" id="dedup-level" hidden>
+        <button data-l="conservative">保守</button>
+        <button data-l="normal" class="on">标准</button>
+        <button data-l="aggressive">激进</button>
+      </div>
+      <div class="tiny" id="dedup-hint" hidden>保守＝只删几乎一模一样的；标准＝连重拍近似也合并；激进＝同场景不同构图也算重复。</div>
     </div>
 
     <div class="psec">
@@ -265,6 +292,8 @@ let DET = {};
 let state = {
   params: { detector:"adaptive", threshold:3.0, min_len:0.6, frame_skip:0 },
   mode: "copy",
+  dedup: false,            // 导出时去重
+  dedupLevel: "normal",
   outdir: "",
   videos: [],
   job: null,
@@ -369,6 +398,18 @@ $("#mode").onclick = e =>{
     : "逐帧精确到检测时间点，H.264 CRF18 重编码，速度慢数倍，体积略增。";
 };
 $("#outdir").oninput = e => state.outdir = e.target.value.trim();
+
+$("#dedup").onchange = e =>{
+  state.dedup = e.target.checked;
+  $("#dedup-level").hidden = !state.dedup;
+  $("#dedup-hint").hidden = !state.dedup;
+  updateFooter();
+};
+$("#dedup-level").onclick = e =>{
+  const b = e.target.closest("button"); if(!b) return;
+  [...$("#dedup-level").children].forEach(x=>x.classList.toggle("on", x===b));
+  state.dedupLevel = b.dataset.l;
+};
 
 /* ---------------- 视频列表 ---------------- */
 function findVideo(token){ return state.videos.find(v=>v.token===token); }
@@ -959,7 +1000,9 @@ function refreshHead(v){ refreshCard(v); }
 function updateFooter(){
   const total = state.videos.reduce((a,v)=>a + (v.status==="ready" ? v.sel.filter(Boolean).length : 0), 0);
   $("#btn-export").disabled = total===0 || (state.job && state.job.state==="running");
-  $("#btn-export").textContent = total ? `导出选中片段（${total}）` : "导出选中片段";
+  $("#btn-export").textContent = total
+    ? (state.dedup ? `去重导出（${total}）` : `导出选中片段（${total}）`)
+    : "导出选中片段";
   if(!state.job || state.job.state!=="running"){
     const vids = state.videos.filter(v=>v.status==="ready").length;
     $("#fstat").textContent = vids ? `${vids} 个视频已就绪 · 选中 ${total} 段` : "就绪";
@@ -1069,9 +1112,10 @@ $("#btn-export").onclick = async ()=>{
   $("#results").innerHTML = "";
   $("#btn-export").disabled = true;
   const r = await fetch("/api/export", {method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({items, mode: state.mode, out_dir: state.outdir || null})}).then(x=>x.json());
+    body: JSON.stringify({items, mode: state.mode, out_dir: state.outdir || null,
+                          dedup: state.dedup ? state.dedupLevel : null})}).then(x=>x.json());
   if(r.error){ toast(r.error); $("#btn-export").disabled=false; return; }
-  toast(state.mode==="copy" ? "开始无损导出…" : "开始重编码导出…");
+  toast(state.dedup ? "先去重，再导出…" : (state.mode==="copy" ? "开始无损导出…" : "开始重编码导出…"));
   poll(r.job);
 };
 
@@ -1100,13 +1144,17 @@ function pushResult(title, lines, dir){
 
 function showExport(j){
   const ok = j.files.filter(f=>f.ok), bad = j.files.filter(f=>!f.ok);
+  const d = j.dedup || null;
+  const skipped = (d && d.skipped) || [];
   const dir = ok.length ? ok[0].path.replace(/[\\/][^\\/]+$/, "") : "";
   const box = document.createElement("div");
   box.className = "result";
-  box.innerHTML = `<h4>导出完成 · 成功 ${ok.length} 个${bad.length?` · 失败 ${bad.length} 个`:""}</h4>
+  box.innerHTML = `<h4>导出完成 · 成功 ${ok.length} 个${bad.length?` · 失败 ${bad.length} 个`:""}${
+      skipped.length ? ` · 去重省 ${skipped.length} 段` : ""}</h4>
     <div class="tiny" style="margin-bottom:8px;word-break:break-all">${dir}</div>
     <ul>${ok.slice(-8).map(f=>`<li>${f.path.split(/[\\/]/).pop()} · ${fmtSize(f.size||0)}</li>`).join("")}
-    ${bad.map(f=>`<li style="color:var(--err)">失败：${f.error}</li>`).join("")}</ul>`;
+    ${bad.map(f=>`<li style="color:var(--err)">失败：${f.error}</li>`).join("")}</ul>
+    ${dedupHtml(d)}`;
   const btn = document.createElement("button");
   btn.className = "ghost"; btn.textContent = "打开文件夹"; btn.style.marginTop = "10px";
   btn.onclick = ()=> openFolder(dir || state.lastOut);
@@ -1120,6 +1168,22 @@ function showExport(j){
   state.lastOut = dir;
   $("#btn-open").style.display = "inline";
   $("#btn-open").onclick = ()=> openFolder(state.lastOut);
+}
+
+const LVL = { conservative:"保守", normal:"标准", aggressive:"激进" };
+function dedupHtml(d){
+  if(!d) return "";
+  if(d.error) return `<div class="dd"><span class="warn">去重没跑完：${d.error}　已按原样导出</span></div>`;
+  const sk = d.skipped || [];
+  const head = sk.length
+    ? `<b>${d.before}</b> 段 → <b>${d.after}</b> 段，跳过 ${sk.length} 段（约 ${fmtDur(d.saved||0)}）`
+    : `${d.before} 段里没有发现重复`;
+  const list = sk.length ? `
+    <details><summary>看看跳过了哪 ${sk.length} 段</summary>
+      <ul>${sk.map(s=>`<li>${s.name} <i>${s.reason}${s.dist?` · 差异 ${s.dist}/256`:""} → 保留 ${s.keep}</i></li>`).join("")}</ul>
+    </details>` : "";
+  const warn = d.no_fp ? `<div class="warn">${d.no_fp} 段抽帧失败，只做了区间重叠判断</div>` : "";
+  return `<div class="dd"><div class="dd-h">去重（${LVL[d.level]||d.level}）：${head}</div>${list}${warn}</div>`;
 }
 
 /* ---------------- 交互 ---------------- */
