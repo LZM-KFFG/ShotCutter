@@ -9,9 +9,14 @@
 
 ## 它能做什么
 
+打开 `http://127.0.0.1:8777/` 是启动台首页，功能分两块：
+
+- **工具板块**（处理现成素材）：`镜头切割器`（`/cutter`）、`字幕去除`（`/sub`，单文件版 VSR 前端）、`视频变高清`（`/hd`，video2x 超分 + RIFE 补帧）
+- **视频生成板块**（从素材到成片）：`一键出片`（`/one`）、`成片流水线`（`/pipeline`）
+
 | 环节 | 说明 |
 |---|---|
-| **切片** | `镜头切割器` 页（`/`）用 PySceneDetect 按镜头切分长视频，导出到源目录下的 `镜头切片/`；流水线第 1 步扫描这些片段（整段视频也能直接加，会当作一个镜头），支持多文件夹、递归扫描、指纹去重；导出时可勾「去重后导出」，重复镜头只出一条 |
+| **切片** | `镜头切割器` 页用 PySceneDetect 按镜头切分长视频，导出到源目录下的 `镜头切片/`；流水线第 1 步扫描这些片段（整段视频也能直接加，会当作一个镜头），支持多文件夹、递归扫描、指纹去重；导出时可勾「去重后导出」，重复镜头只出一条 |
 | **去硬字幕** | 调本机 VSR（默认 `D:\Tools\VSR`）把烧进画面的字幕抹掉再进池：可选「自动检测」逐帧找字幕，或「固定底部区域」整块重绘（快很多）；支持整文件夹批量，也能只处理勾选的素材；处理完在卡片里直接列出结果，可单个下载、打包下载，也能一键「全部加入素材池」 |
 | **打标** | 先用 OpenCV 算亮度 / 色调 / 饱和度 / 细节 / 动态等视觉特征；接了视觉大模型后再加「场景 / 主体 / 动作 / 景别 / 氛围」语义标签，分镜匹配会准很多 |
 | **脚本** | 内置 **14 种口播角度**（痛点切入、对比实测、参数硬核、避坑提醒、场景代入、亲身自述、算账划算、问答答疑、口碑回购、开箱第一眼、用法教程、送礼场景、时令当季、反常识），按商品信息生成带停顿与镜头提示的口播稿 |
@@ -367,6 +372,11 @@ ShotCutter/
 | POST | `/api/export` | 导出选中片段：`{items:[{token,keep}], mode: copy\|recode, out_dir, dedup: conservative\|normal\|aggressive}`；`dedup` 为空即原样导出，去重报告在 `job.dedup` |
 | POST | `/api/pipe/desub` | 去字幕（`folders` 或 `ids`，`mode`=auto/box，`box`=上下左右百分比） |
 | POST | `/api/pipe/llm/start` `/llm/stop` | 本地模型启停 |
+| GET | `/api/hd/info` `/hd/status` | 视频变高清：引擎/GPU 探测、任务状态（帧/fps/ETA/日志） |
+| POST | `/api/hd/probe` `/hd/start` `/hd/cancel` | 高清：读视频信息 / 启动（`processor`/`model`/`factor`/`interp_factor`/`codec`/`quality`）/ 取消；输出到 `D:\VideoUpscaler\output` |
+| GET | `/api/sub/info` `/sub/status` `/sub/frame?path=&t=` | 字幕去除：引擎探测、任务状态、抽帧预览（给区域框选用） |
+| POST | `/api/sub/probe` `/sub/start` `/sub/cancel` | 字幕去除：读视频信息 / 启动（`area`=`ymin,ymax,xmin,xmax` 或 `none` 全帧自动）/ 取消；输出 `<原名>_no_sub.mp4` 在原目录 |
+| POST | `/api/tool/pick` `/tool/play` | 工具页共用：系统文件选择框 / 用默认播放器打开文件 |
 
 ---
 

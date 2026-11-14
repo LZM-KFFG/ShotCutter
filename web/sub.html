@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>字幕去除 · ShotCutter</title>
+<style>
+:root{
+  color-scheme:dark;
+  --bg:#131210; --panel:#1b1a18; --line:#2a2926; --line-2:#3a3831;
+  --ink:#eceae4; --muted:#a8a49b; --dim:#7e7a71;
+  --accent:#6b9aff; --accent-2:#242a3e; --ok:#5fd39a; --warn:#e5b05e; --bad:#f07d6e;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#3a3831;border-radius:5px;border:2px solid #131210}
+::-webkit-scrollbar-thumb:hover{background:#4a4740}
+::-webkit-scrollbar-track{background:transparent}
+::selection{background:rgba(107,154,255,.30)}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+header{position:sticky;top:0;z-index:30;background:rgba(19,18,16,.85);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.hw{max-width:1360px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.brand{display:flex;flex-direction:column;gap:1px}
+.brand h1{font-size:15px;margin:0;font-weight:650;letter-spacing:.2px}
+.brand p{margin:0;font-size:11.5px;color:var(--muted)}
+.sp{flex:1}
+.nav{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.nav .ng{font-size:10px;color:var(--dim);letter-spacing:1px;margin:0 3px 0 6px;user-select:none}
+.nav .ng:first-child{margin-left:0}
+.nav a{font-size:12.5px;padding:5px 13px;border-radius:999px;border:1px solid var(--line);background:#1b1a18;color:var(--muted);cursor:pointer;transition:.14s}
+.nav a:hover{color:var(--ink);border-color:var(--line-2);background:#201f1c}
+.nav a.on{background:var(--ink);color:#171614;border-color:var(--ink);font-weight:600}
+main{max-width:980px;margin:0 auto;padding:22px 20px 140px}
+.pagehead{margin-bottom:18px}
+.pagehead h2{margin:0 0 4px;font-size:20px;font-weight:650}
+.pagehead p{margin:0;font-size:12.5px;color:var(--muted)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:14px}
+.card h3{font-size:12.5px;margin:0 0 12px;font-weight:650;color:var(--muted);letter-spacing:.4px}
+.frow{display:flex;gap:8px}
+.frow input{flex:1;min-width:0;font:12.5px var(--mono);padding:8px 11px;border:1px solid var(--line-2);border-radius:9px;background:#201f1c;color:var(--ink);outline:none}
+.frow input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(107,154,255,.13)}
+button.b{font:inherit;font-size:13px;padding:8px 14px;border-radius:9px;border:1px solid var(--ink);background:var(--ink);color:#171614;cursor:pointer;transition:.15s;font-weight:600}
+button.b:hover{opacity:.86}
+button.b:disabled{opacity:.4;cursor:not-allowed}
+button.g{font:inherit;font-size:13px;padding:8px 14px;border-radius:9px;border:1px solid var(--line-2);background:#1b1a18;color:var(--ink);cursor:pointer}
+button.g:hover{background:#201f1c}
+button.g:disabled{opacity:.45;cursor:not-allowed}
+button.g.on{background:var(--accent-2);border-color:#3d517e;color:#9db9ff;font-weight:600}
+.info{margin-top:10px;font:11.5px var(--mono);color:var(--muted);line-height:1.7}
+.info b{color:var(--ink);font-weight:600}
+.hint{font-size:11.5px;color:var(--dim);margin-top:7px;line-height:1.55}
+input[type=range]{-webkit-appearance:none;width:100%;height:22px;background:transparent;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:4px;background:#3a3831;border-radius:2px}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+  background:#eceae4;border:2px solid var(--accent);margin-top:-5px;box-shadow:0 0 0 3px rgba(107,154,255,.14);cursor:pointer}
+.pvwrap{position:relative;display:inline-block;max-width:100%;border-radius:10px;overflow:hidden;border:1px solid var(--line);line-height:0;user-select:none}
+.pvwrap img{max-width:100%;max-height:420px;display:block;cursor:crosshair;pointer-events:none}
+.pvwrap .ov{position:absolute;inset:0;cursor:crosshair}
+.pvwrap .box{position:absolute;border:2px solid #6b9aff;background:rgba(107,154,255,.16);box-shadow:0 0 0 1px rgba(0,0,0,.5);display:none}
+.trow{display:flex;align-items:center;gap:10px;margin-top:10px}
+.trow .tv{font:11.5px var(--mono);color:var(--muted);min-width:72px;text-align:right}
+.arearow{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:12px}
+.arealabel{font-size:11.5px;color:var(--dim);margin-right:2px}
+.areaval{font:11.5px var(--mono);color:#9db9ff;background:var(--accent-2);border:1px solid #3d517e;border-radius:6px;padding:2px 9px}
+button.sm{font-size:12px;padding:5px 11px}
+.warn{font-size:11.5px;color:var(--warn);line-height:1.65;margin-top:10px}
+.prog-wrap{display:none}
+.prog-wrap.on{display:block}
+.pbar{height:6px;background:#2b2926;border-radius:3px;overflow:hidden}
+.pbar i{display:block;height:100%;background:var(--accent);width:0;transition:width .3s;border-radius:3px}
+.pmeta{display:flex;gap:16px;flex-wrap:wrap;margin-top:9px;font:11.5px var(--mono);color:var(--muted)}
+.pmeta b{color:var(--ink);font-weight:600}
+.pmeta .ph{color:var(--accent)}
+.log{margin-top:12px;background:#171614;border:1px solid var(--line);border-radius:10px;padding:10px 12px;max-height:180px;overflow:auto;font:11px var(--mono);color:#b3afa6;line-height:1.65;white-space:pre-wrap;word-break:break-all}
+.result{display:none;margin-top:14px;background:var(--accent-2);border:1px solid #3d517e;border-radius:12px;padding:12px 14px;align-items:center;gap:10px;flex-wrap:wrap}
+.result.on{display:flex}
+.result .rn{font-size:12.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:46%}
+.result .rn b{color:#9db9ff}
+footer{position:fixed;bottom:0;left:0;right:0;z-index:30;background:rgba(24,23,21,.92);backdrop-filter:blur(10px);border-top:1px solid var(--line)}
+.fw{max-width:980px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.msg{font-size:12px;color:var(--muted)}
+.msg.err{color:var(--bad)}
+.msg.ok{color:var(--ok)}
+.empty{color:var(--dim);font-size:12px;text-align:center;padding:36px 16px;border:1px dashed var(--line-2);border-radius:10px;line-height:1.7}
+</style>
+</head>
+<body>
+<header>
+  <div class="hw">
+    <div class="brand">
+      <h1>字幕去除</h1>
+      <p>AI 检测并擦除画面里的硬字幕 · VSR 本地引擎</p>
+    </div>
+    <div class="sp"></div>
+    <nav class="nav">
+      <span class="ng">工具</span>
+      <a href="/cutter">镜头切割器</a>
+      <a href="/sub" class="on">字幕去除</a>
+      <a href="/hd">视频变高清</a>
+      <span class="ng">生成</span>
+      <a href="/one">一键出片</a>
+      <a href="/pipeline">流水线</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="pagehead">
+    <h2>字幕去除</h2>
+    <p>先抽一帧确认字幕位置，框选区域后开始。擦除速度取决于显卡，长视频请耐心。</p>
+  </div>
+
+  <div class="card">
+    <h3>素材</h3>
+    <div class="frow">
+      <input id="input" placeholder="粘贴视频路径，或点右边选择">
+      <button class="g" id="btnBrowse">浏览</button>
+    </div>
+    <div class="info" id="info">还没选视频</div>
+  </div>
+
+  <div class="card" id="pvCard" hidden>
+    <h3>字幕区域 · 在画面上拖一个框罩住字幕</h3>
+    <div class="pvwrap">
+      <img id="pv" alt="预览帧">
+      <div class="ov" id="ov"></div>
+      <div class="box" id="box"></div>
+    </div>
+    <div class="trow">
+      <span style="font-size:11.5px;color:var(--muted);white-space:nowrap">抽帧时间</span>
+      <input type="range" id="tseek" min="0" max="10" step="0.5" value="1">
+      <span class="tv" id="tval">1.0s</span>
+    </div>
+    <div class="arearow">
+      <span class="arealabel">快捷</span>
+      <button class="g sm on" data-preset="bottom">底部字幕</button>
+      <button class="g sm" data-preset="top">顶部字幕</button>
+      <button class="g sm" data-preset="none">全帧自动检测</button>
+      <span class="areaval" id="areaval">-</span>
+    </div>
+    <div class="hint">框得越准，擦除越干净、速度也越快（区域外的画面不用修复）。默认按底部 30% 预估，先拖时间轴确认字幕真的在这个位置。</div>
+  </div>
+
+  <div class="card">
+    <h3>进度</h3>
+    <div class="prog-wrap" id="progWrap">
+      <div class="pbar"><i id="pfill"></i></div>
+      <div class="pmeta">
+        <span class="ph" id="pphase">准备中</span>
+        <span>帧 <b id="pframe">0</b>/<b id="ptotal">0</b></span>
+        <span>已用 <b id="pelapsed">--</b></span>
+        <span><b id="ppct">0</b>%</span>
+      </div>
+      <div class="log" id="log"></div>
+    </div>
+    <div class="hint" id="progIdle">还没开始。选好视频和区域后点下面的「开始处理」。</div>
+    <div class="result" id="result">
+      <span class="rn">输出：<b id="rname">-</b></span>
+      <span class="sp"></span>
+      <button class="g" id="btnPlay">播放</button>
+      <button class="g" id="btnReveal">在文件夹中显示</button>
+    </div>
+    <div class="warn" id="warnBox" hidden></div>
+  </div>
+</main>
+
+<footer>
+  <div class="fw">
+    <button class="b" id="btnStart" style="min-width:128px">开始处理</button>
+    <button class="g" id="btnCancel" disabled>取消</button>
+    <span class="msg" id="msg"></span>
+  </div>
+</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+const state = { video: null, area: null, preset: "bottom", out: "", running: false, timer: null, drag: null };
+
+function setMsg(t, cls){ const m = $("#msg"); m.textContent = t || ''; m.className = "msg " + (cls||""); }
+
+async function api(path, body){
+  const opt = body ? {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)} : {};
+  const r = await fetch(path, opt);
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.error || ("请求失败 " + r.status));
+  return j;
+}
+
+/* ---------- 预设 ---------- */
+function applyPreset(name){
+  state.preset = name;
+  const v = state.video;
+  document.querySelectorAll("[data-preset]").forEach(b =>
+    b.classList.toggle("on", b.dataset.preset === name));
+  if(name === "none"){
+    state.area = null;
+    $("#areaval").textContent = "全帧自动检测";
+    $("#box").style.display = "none";
+    return;
+  }
+  if(!v || !v.height) return;
+  const h = v.height, w = v.width;
+  if(name === "bottom") state.area = {y0: Math.round(h * .70), y1: h, x0: 0, x1: w};
+  if(name === "top")    state.area = {y0: 0, y1: Math.round(h * .30), x0: 0, x1: w};
+  paintArea();
+}
+
+function areaStr(){
+  const a = state.area;
+  return a ? `${a.y0},${a.y1},${a.x0},${a.x1}` : "none";
+}
+
+function paintArea(){
+  const a = state.area;
+  if(!a){ $("#areaval").textContent = "全帧自动检测"; $("#box").style.display = "none"; return; }
+  $("#areaval").textContent = `ymin,ymax,xmin,xmax = ${areaStr()}`;
+  const img = $("#pv");
+  const sw = img.naturalWidth, sh = img.naturalHeight;
+  if(!sw || !sh) return;
+  const k = img.clientWidth / sw;
+  const b = $("#box");
+  b.style.display = "block";
+  b.style.left = (a.x0 * k) + "px";
+  b.style.top = (a.y0 * k) + "px";
+  b.style.width = ((a.x1 - a.x0) * k) + "px";
+  b.style.height = ((a.y1 - a.y0) * k) + "px";
+}
+
+/* ---------- 拖框 ---------- */
+(function(){
+  const ov = $("#ov");
+  const rel = e => {
+    const r = ov.getBoundingClientRect();
+    return {x: e.clientX - r.left, y: e.clientY - r.top};
+  };
+  ov.addEventListener("mousedown", e => {
+    e.preventDefault();
+    const p = rel(e);
+    state.drag = {x0: p.x, y0: p.y};
+    state.preset = "custom";
+    document.querySelectorAll("[data-preset]").forEach(b => b.classList.remove("on"));
+  });
+  window.addEventListener("mousemove", e => {
+    if(!state.drag) return;
+    const p = rel(e);
+    const x0 = Math.min(state.drag.x0, p.x), x1 = Math.max(state.drag.x0, p.x);
+    const y0 = Math.min(state.drag.y0, p.y), y1 = Math.max(state.drag.y0, p.y);
+    const b = $("#box");
+    b.style.display = "block";
+    b.style.left = x0 + "px"; b.style.top = y0 + "px";
+    b.style.width = (x1 - x0) + "px"; b.style.height = (y1 - y0) + "px";
+  });
+  window.addEventListener("mouseup", e => {
+    if(!state.drag) return;
+    const p = rel(e);
+    const img = $("#pv"), k = img.naturalWidth ? (img.naturalWidth / img.clientWidth) : 1;
+    const v = state.video || {width: img.naturalWidth, height: img.naturalHeight};
+    let x0 = Math.round(Math.min(state.drag.x0, p.x) * k), x1 = Math.round(Math.max(state.drag.x0, p.x) * k);
+    let y0 = Math.round(Math.min(state.drag.y0, p.y) * k), y1 = Math.round(Math.max(state.drag.y0, p.y) * k);
+    state.drag = null;
+    if((x1 - x0) < 8 || (y1 - y0) < 8){ setMsg("框太小了，重新拖一个", "err"); paintArea(); return; }
+    x0 = Math.max(0, x0); y0 = Math.max(0, y0);
+    x1 = Math.min(v.width, x1); y1 = Math.min(v.height, y1);
+    state.area = {x0, y0, x1, y1};
+    paintArea();
+  });
+  window.addEventListener("resize", paintArea);
+})();
+
+/* ---------- 抽帧 ---------- */
+let seekTimer = null;
+function loadFrame(){
+  const v = state.video;
+  if(!v) return;
+  const t = +$("#tseek").value;
+  $("#tval").textContent = t.toFixed(1) + "s";
+  $("#pv").src = "/api/sub/frame?path=" + encodeURIComponent(v.path) + "&t=" + t;
+}
+$("#pv").addEventListener("load", paintArea);
+$("#tseek").addEventListener("input", () => {
+  $("#tval").textContent = (+$("#tseek").value).toFixed(1) + "s";
+  clearTimeout(seekTimer);
+  seekTimer = setTimeout(loadFrame, 260);
+});
+
+/* ---------- 文件 ---------- */
+async function probe(){
+  const p = $("#input").value.trim();
+  if(!p) return;
+  setMsg("读取视频信息…");
+  try{
+    const v = await api("/api/sub/probe", {path: p});
+    state.video = v;
+    $("#info").innerHTML =
+      `<b>${v.name}</b> · ${v.width}×${v.height} · ${v.fps}fps · ${v.codec} · ${v.duration_text} · ${v.size_mb} MB · ${v.frames} 帧`;
+    $("#pvCard").hidden = false;
+    const dur = Math.max(0.5, v.duration || 1);
+    $("#tseek").max = Math.max(0, dur - 0.2).toFixed(1);
+    $("#tseek").value = Math.min(dur * 0.3, dur - 0.2).toFixed(1);
+    applyPreset(state.preset === "custom" ? "bottom" : state.preset);
+    loadFrame();
+    setMsg("");
+  }catch(e){
+    state.video = null;
+    $("#pvCard").hidden = true;
+    $("#info").textContent = "读取失败";
+    setMsg(e.message, "err");
+  }
+}
+
+async function pick(){
+  setMsg("打开选择窗口…");
+  try{
+    const r = await api("/api/tool/pick", {});
+    if(r.state === "busy" || r.state === "timeout"){ setMsg(r.error, "err"); return; }
+    if(r.state !== "ok"){ setMsg(""); return; }
+    if(r.paths && r.paths[0]){
+      $("#input").value = r.paths[0];
+      probe();
+    }
+  }catch(e){ setMsg(e.message, "err"); }
+}
+
+/* ---------- 任务 ---------- */
+function paint(st){
+  state.running = st.running;
+  $("#progWrap").classList.toggle("on", st.running || !!st.output || !!st.error);
+  $("#progIdle").style.display = (st.running || st.output || st.error) ? "none" : "";
+  $("#pfill").style.width = (st.percent || 0) + "%";
+  $("#ppct").textContent = Math.round(st.percent || 0);
+  $("#pphase").textContent = st.phase || "";
+  $("#pframe").textContent = st.frame || 0;
+  $("#ptotal").textContent = st.total || 0;
+  $("#pelapsed").textContent = st.elapsed || "--";
+  const lines = st.lines || [];
+  const lg = $("#log");
+  const atBottom = lg.scrollTop + lg.clientHeight >= lg.scrollHeight - 30;
+  lg.textContent = lines.join("\n");
+  if(atBottom) lg.scrollTop = lg.scrollHeight;
+  $("#btnStart").disabled = st.running;
+  $("#btnCancel").disabled = !st.running;
+  const done = !st.running && st.output && st.phase === "已完成";
+  $("#result").classList.toggle("on", !!done);
+  if(done){
+    state.out = st.output;
+    $("#rname").textContent = st.output.split(/[\\/]/).pop();
+    setMsg("完成", "ok");
+  } else if(st.error){
+    setMsg(st.error, "err");
+  } else if(st.running){
+    setMsg(st.phase || "处理中…");
+  }
+}
+
+async function poll(){
+  try{ paint(await api("/api/sub/status")); }catch(e){ /* 下轮再试 */ }
+}
+
+async function start(){
+  const inp = $("#input").value.trim();
+  if(!inp){ setMsg("先选一个视频", "err"); return; }
+  if(!state.video){ await probe(); if(!state.video) return; }
+  setMsg("启动…");
+  try{
+    await api("/api/sub/start", {input: inp, area: areaStr()});
+    $("#result").classList.remove("on");
+    $("#log").textContent = "";
+    setMsg("已启动，首次加载模型可能要等一两分钟");
+  }catch(e){ setMsg(e.message, "err"); }
+}
+
+async function cancel(){
+  try{ await api("/api/sub/cancel", {}); setMsg("已发送取消，等进程退出…"); }
+  catch(e){ setMsg(e.message, "err"); }
+}
+
+$("#btnBrowse").addEventListener("click", pick);
+$("#input").addEventListener("change", probe);
+$("#input").addEventListener("keydown", e => { if(e.key === "Enter") probe(); });
+$("#btnStart").addEventListener("click", start);
+$("#btnCancel").addEventListener("click", cancel);
+$("#btnPlay").addEventListener("click", async () => {
+  if(state.out) await api("/api/tool/play", {path: state.out}).catch(e => setMsg(e.message, "err"));
+});
+$("#btnReveal").addEventListener("click", async () => {
+  if(state.out) await api("/api/openfolder", {path: state.out}).catch(e => setMsg(e.message, "err"));
+});
+document.querySelectorAll("[data-preset]").forEach(b =>
+  b.addEventListener("click", () => applyPreset(b.dataset.preset)));
+
+(async function init(){
+  const info = await api("/api/sub/info").catch(() => null);
+  if(info && !info.vsr){
+    const w = $("#warnBox"); w.hidden = false;
+    w.textContent = "找不到 VSR 引擎：" + info.root + " —— 请确认 D:\\Tools\\VSR 目录还在。";
+  }
+  poll();
+  state.timer = setInterval(poll, 1500);
+})();
+</script>
+</body>
+</html>

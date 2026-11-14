@@ -1380,6 +1380,419 @@ try{
 """
 
 
+# ================= 独立工具：视频变高清（video2x）/ 字幕去除（VSR） =================
+# 两个工具都是一次一个任务的 GPU 重活，各自一个单例跟踪器，不进 JOBS 池。
+VU_ROOT = Path(r"D:\VideoUpscaler")
+V2X = VU_ROOT / "tools" / "video2x.exe"
+VU_BIN = VU_ROOT / "tools" / "ffmpeg-9.0.2-essentials_build" / "bin"
+VU_FFPROBE = VU_BIN / "ffprobe.exe"
+VU_OUT = VU_ROOT / "output"
+
+VSR_ROOT = Path(r"D:\Tools\VSR")
+VSR_PY = VSR_ROOT / "Python" / "python.exe"
+VSR_RES = VSR_ROOT / "resources"
+VSR_RUN = VSR_RES / "run_with_area.py"
+
+
+def _fmt_hms(sec) -> str:
+    sec = int(max(0, sec or 0))
+    h, rem = divmod(sec, 3600)
+    m, s = divmod(rem, 60)
+    return "%d:%02d:%02d" % (h, m, s) if h else "%02d:%02d" % (m, s)
+
+
+class ToolJob:
+    """video2x / VSR 共用的单任务跟踪器。"""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.reset()
+
+    def reset(self):
+        self.running = False
+        self.phase = ""
+        self.percent = 0.0
+        self.frame = 0
+        self.total = 0
+        self.fps = 0.0
+        self.lines: list[str] = []
+        self.output = ""
+        self.error = ""
+        self.started_at = 0.0
+        self.finished_at = 0.0
+        self.proc = None
+        self.extra = {}
+
+    def log(self, text):
+        text = (text or "").rstrip()
+        if not text:
+            return
+        with self.lock:
+            self.lines.append(text)
+            if len(self.lines) > 500:
+                del self.lines[:200]
+
+    def snapshot(self):
+        with self.lock:
+            elapsed = ""
+            if self.started_at:
+                elapsed = _fmt_hms((self.finished_at or time.time()) - self.started_at)
+            eta = ""
+            if self.fps > 0 and self.total > self.frame:
+                eta = _fmt_hms((self.total - self.frame) / self.fps)
+            return {
+                "running": self.running, "phase": self.phase,
+                "frame": self.frame, "total": self.total,
+                "fps": round(self.fps, 2), "percent": round(self.percent, 1),
+                "elapsed": elapsed, "eta": eta, "output": self.output,
+                "error": self.error, "lines": self.lines[-160:],
+                "extra": dict(self.extra),
+            }
+
+
+HD_JOB = ToolJob()
+SUB_JOB = ToolJob()
+_HD_GPUS: list[dict] = []
+_HD_GPU_LOCK = threading.Lock()
+
+
+def _tool_capture(args, timeout=30):
+    try:
+        p = subprocess.run(args, capture_output=True, timeout=timeout,
+                           creationflags=NO_WINDOW)
+        return p.returncode, p.stdout.decode("utf-8", "replace") + p.stderr.decode("utf-8", "replace")
+    except Exception as exc:  # noqa: BLE001
+        return -1, str(exc)
+
+
+def tool_probe(path: str) -> dict:
+    """用 VideoUpscaler 自带的 ffprobe 读视频信息（imageio-ffmpeg 不带 ffprobe）。"""
+    if not VU_FFPROBE.exists():
+        raise RuntimeError("找不到 ffprobe：%s" % VU_FFPROBE)
+    p = Path(path.strip().strip('"'))
+    if not p.is_file():
+        raise RuntimeError("找不到这个文件：%s" % p)
+    code, out = _tool_capture(
+        [str(VU_FFPROBE), "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=width,height,r_frame_rate,codec_name,nb_frames",
+         "-show_entries", "format=duration,size", "-of", "json", str(p)])
+    if code != 0:
+        raise RuntimeError((out.strip() or "无法读取视频信息")[:300])
+    data = json.loads(out)
+    st = (data.get("streams") or [{}])[0]
+    fmt = data.get("format") or {}
+    num, _, den = (st.get("r_frame_rate") or "0/1").partition("/")
+    try:
+        fps = round(float(num) / float(den or 1), 3)
+    except Exception:  # noqa: BLE001
+        fps = 0.0
+    duration = float(fmt.get("duration") or 0)
+    frames = st.get("nb_frames")
+    if not frames or not str(frames).isdigit():
+        frames = int(duration * fps) if fps else 0
+    return {"path": str(p), "name": p.name,
+            "width": st.get("width", 0), "height": st.get("height", 0),
+            "fps": fps, "codec": st.get("codec_name", ""),
+            "duration": duration, "duration_text": _fmt_hms(duration),
+            "size_mb": round(float(fmt.get("size") or 0) / 1048576, 1),
+            "frames": int(frames)}
+
+
+def hd_gpus(refresh: bool = False) -> list[dict]:
+    global _HD_GPUS
+    with _HD_GPU_LOCK:
+        if refresh or not _HD_GPUS:
+            code, out = _tool_capture([str(V2X), "-l"], timeout=25)
+            gpus = []
+            if code == 0:
+                for line in out.splitlines():
+                    m = re.match(r"^(\d+)\.\s+(.+)$", line.strip())
+                    if m:
+                        gpus.append({"index": int(m.group(1)), "name": m.group(2).strip()})
+            if gpus:
+                _HD_GPUS = gpus
+        return list(_HD_GPUS)
+
+
+def hd_build_command(p: dict, inp: str, out: str, phase: str) -> list[str]:
+    processor = p.get("processor", "realesrgan")
+    codec = p.get("codec", "hevc_nvenc")
+    quality = int(p.get("quality", 20))
+    device = str(int(p.get("device", 0)))
+    if phase == "interp":
+        cmd = [str(V2X), "-i", inp, "-o", out, "-p", "rife",
+               "-m", str(int(p.get("interp_factor", 2))),
+               "--rife-model", p.get("rife_model", "rife-v4.6")]
+    else:
+        cmd = [str(V2X), "-i", inp, "-o", out, "-p", processor]
+        if processor == "realesrgan":
+            cmd += ["--realesrgan-model", p.get("model", "realesr-animevideov3")]
+        elif processor == "realcugan":
+            cmd += ["--realcugan-model", p.get("cugan_model", "models-pro"),
+                    "--realcugan-syncgap", str(int(p.get("syncgap", 3)))]
+        elif processor == "libplacebo":
+            cmd += ["--libplacebo-shader", p.get("shader", "anime4k-v4-a+a")]
+        cmd += ["-s", str(int(p.get("factor", 3)))]
+    cmd += ["-c", codec, "-d", device]
+    if codec.endswith("_nvenc"):
+        cmd += ["-e", "preset=" + p.get("nvenc_preset", "p5"), "-e", "cq=%d" % quality]
+    else:
+        cmd += ["-e", "crf=%d" % quality, "-e", "preset=" + p.get("x_preset", "medium")]
+    return cmd
+
+
+_V2X_PROG = re.compile(r"frame=(\d+)/(\d+)[^;]*;\s*fps=([\d.]+)")
+
+
+def _hd_pump(stream, phase: str):
+    """video2x 的进度用 \\r 刷新，逐字符读。"""
+    buf = b""
+    while True:
+        chunk = stream.read(1)
+        if not chunk:
+            break
+        if chunk in (b"\r", b"\n"):
+            line = buf.decode("utf-8", "replace")
+            buf = b""
+            m = _V2X_PROG.search(line)
+            if m:
+                cur, tot, fps = int(m.group(1)), int(m.group(2)), float(m.group(3))
+                with HD_JOB.lock:
+                    HD_JOB.frame, HD_JOB.total, HD_JOB.fps = cur, tot, fps
+                    if tot:
+                        share = 0.85 if HD_JOB.extra.get("interp_on") else 1.0
+                        if phase == "upscale":
+                            HD_JOB.percent = min(99.5, cur / tot * 100 * share)
+                        else:
+                            HD_JOB.percent = min(99.5, 85 + cur / tot * 15)
+                continue
+            if line.strip() and not line.strip().startswith("\x1b"):
+                HD_JOB.log(line)
+        else:
+            buf += chunk
+            if len(buf) > 20000:
+                buf = b""
+
+
+def _hd_exec(cmd: list[str], phase: str) -> int:
+    HD_JOB.log("$ " + " ".join('"%s"' % c if " " in c else c for c in cmd))
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            creationflags=NO_WINDOW, bufsize=0)
+    with HD_JOB.lock:
+        HD_JOB.proc = proc
+    _hd_pump(proc.stdout, phase)
+    proc.wait()
+    with HD_JOB.lock:
+        HD_JOB.proc = None
+    return proc.returncode
+
+
+def _hd_output_ok(path: str) -> bool:
+    """video2x 6.4.0 完成后退出时可能崩 0xC0000005 但文件是好的，必须验文件。"""
+    if not os.path.exists(path) or os.path.getsize(path) < 2048:
+        return False
+    code, out = _tool_capture(
+        [str(VU_FFPROBE), "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "format=duration", "-of", "csv=p=0", path], timeout=60)
+    return code == 0 and out.strip().replace(".", "", 1).isdigit()
+
+
+def _hd_dur(path: str) -> float:
+    code, out = _tool_capture(
+        [str(VU_FFPROBE), "-v", "error", "-show_entries", "format=duration",
+         "-of", "csv=p=0", path], timeout=60)
+    try:
+        return float(out.strip()) if code == 0 else 0.0
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
+def hd_worker(p: dict):
+    try:
+        inp = p["input"]
+        factor = int(p.get("factor", 3))
+        interp = int(p.get("interp_factor", 1))
+        base = os.path.splitext(os.path.basename(inp))[0]
+        out = os.path.join(str(VU_OUT), "%s_%dx%s.mp4" % (
+            base, factor, "f%d" % interp if interp > 1 else ""))
+        os.makedirs(VU_OUT, exist_ok=True)
+        with HD_JOB.lock:
+            HD_JOB.reset()
+            HD_JOB.running = True
+            HD_JOB.started_at = time.time()
+            HD_JOB.output = out
+            HD_JOB.extra = {"interp_on": interp > 1}
+            HD_JOB.phase = "放大处理中"
+        tmp = None
+        target = out
+        if interp > 1:
+            tmp = os.path.join(str(VU_OUT), ".tmp_" + base + ".mp4")
+            target = tmp
+        rc = _hd_exec(hd_build_command(p, inp, target, "upscale"), "upscale")
+        if not _hd_output_ok(target):
+            raise RuntimeError("放大阶段失败，退出码 %s，没有生成有效文件" % rc)
+        if rc != 0:
+            # video2x 正常写完后也可能崩在退出码上，但被取消的半成品时长会短一截，
+            # 拿输出时长对比输入时长区分这两种情况。
+            in_dur, out_dur = _hd_dur(inp), _hd_dur(target)
+            if in_dur and out_dur < in_dur * 0.95:
+                raise RuntimeError("放大阶段中断（退出码 %s），产物不完整" % rc)
+            HD_JOB.log("提示：video2x 退出码 %s，但产物完整，按成功处理" % rc)
+        if interp > 1:
+            with HD_JOB.lock:
+                HD_JOB.phase = "插帧处理中"
+                HD_JOB.frame = HD_JOB.total = 0
+                HD_JOB.percent = 85
+            rc = _hd_exec(hd_build_command(p, tmp, out, "interp"), "interp")
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            if not _hd_output_ok(out):
+                raise RuntimeError("插帧阶段失败，退出码 %s，没有生成有效文件" % rc)
+            if rc != 0:
+                in_dur, out_dur = _hd_dur(tmp), _hd_dur(out)
+                if in_dur and out_dur < in_dur * 0.95:
+                    raise RuntimeError("插帧阶段中断（退出码 %s），产物不完整" % rc)
+        with HD_JOB.lock:
+            HD_JOB.percent = 100
+            HD_JOB.phase = "已完成"
+        HD_JOB.log("完成，输出：" + out)
+    except Exception as exc:  # noqa: BLE001
+        with HD_JOB.lock:
+            HD_JOB.error = str(exc)
+            HD_JOB.phase = "出错了"
+        HD_JOB.log("错误：" + str(exc))
+    finally:
+        with HD_JOB.lock:
+            HD_JOB.running = False
+            HD_JOB.finished_at = time.time()
+
+
+_TQDM_PCT = re.compile(r"(\d+)%\|")
+_TQDM_CNT = re.compile(r"\b(\d+)/(\d+)\b")
+
+
+def _sub_pump(stream):
+    """VSR 的进度：tqdm 条（\\r 刷新）+ 阶段打印。
+    找字幕阶段占前 50%，修复画面阶段占后 50%。"""
+    buf = b""
+    stage = ["find"]
+    while True:
+        chunk = stream.read(1)
+        if not chunk:
+            break
+        if chunk in (b"\r", b"\n"):
+            line = buf.decode("utf-8", "replace")
+            buf = b""
+            low = line.strip()
+            if low.startswith("[Processing] start finding"):
+                stage[0] = "find"
+                with SUB_JOB.lock:
+                    SUB_JOB.phase = "检测字幕位置（前半程）"
+                continue
+            if low.startswith("[Finished] Finished finding"):
+                stage[0] = "remove"
+                with SUB_JOB.lock:
+                    SUB_JOB.phase = "AI 修复画面（后半程）"
+                continue
+            m = _TQDM_PCT.search(line)
+            if m:
+                pct = float(m.group(1))
+                mc = _TQDM_CNT.search(line)
+                with SUB_JOB.lock:
+                    if SUB_JOB.phase.startswith("启动引擎"):
+                        SUB_JOB.phase = "字幕检测与修复中"
+                    if mc:
+                        SUB_JOB.frame, SUB_JOB.total = int(mc.group(1)), int(mc.group(2))
+                        if pct <= 0 and SUB_JOB.total:
+                            pct = SUB_JOB.frame / SUB_JOB.total * 100
+                    SUB_JOB.percent = min(99.5, (pct / 2 if stage[0] == "find" else 50 + pct / 2))
+                continue
+            if low and not low.startswith("\x1b"):
+                SUB_JOB.log(line)
+        else:
+            buf += chunk
+            if len(buf) > 20000:
+                buf = b""
+
+
+def sub_worker(inp: str, area: str):
+    try:
+        out = os.path.join(os.path.dirname(inp),
+                           os.path.splitext(os.path.basename(inp))[0] + "_no_sub.mp4")
+        started = time.time()
+        # 上一次跑出的旧 _no_sub 文件还在的话，不能把它当成这次的结果
+        stale_before = os.path.getmtime(out) if os.path.exists(out) else 0
+        with SUB_JOB.lock:
+            SUB_JOB.reset()
+            SUB_JOB.running = True
+            SUB_JOB.started_at = time.time()
+            SUB_JOB.output = out
+            SUB_JOB.phase = "启动引擎（首次加载模型较慢）"
+        env = dict(os.environ)
+        # QPT_MODE=Running：跳过 QPT 的重新部署循环（否则一卡就是 20 分钟）
+        env.update({"QPT_MODE": "Running", "QPT_COLOR": "False",
+                    "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"})
+        cmd = [str(VSR_PY), str(VSR_RUN), inp, area or "none"]
+        SUB_JOB.log("$ " + " ".join('"%s"' % c if " " in c else c for c in cmd))
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                cwd=str(VSR_RES), env=env,
+                                creationflags=NO_WINDOW, bufsize=0)
+        with SUB_JOB.lock:
+            SUB_JOB.proc = proc
+        _sub_pump(proc.stdout)
+        proc.wait()
+        with SUB_JOB.lock:
+            SUB_JOB.proc = None
+        if proc.returncode != 0 and not (
+                os.path.exists(out) and os.path.getmtime(out) > started):
+            raise RuntimeError("VSR 退出码 %s，没有生成新的输出文件" % proc.returncode)
+        if not os.path.exists(out) or os.path.getmtime(out) <= stale_before:
+            raise RuntimeError("处理结束但没有生成新的输出文件（预期：%s）" % out)
+        with SUB_JOB.lock:
+            SUB_JOB.percent = 100
+            SUB_JOB.phase = "已完成"
+        SUB_JOB.log("完成，输出：" + out)
+    except Exception as exc:  # noqa: BLE001
+        with SUB_JOB.lock:
+            SUB_JOB.error = str(exc)
+            SUB_JOB.phase = "出错了"
+        SUB_JOB.log("错误：" + str(exc))
+    finally:
+        with SUB_JOB.lock:
+            SUB_JOB.running = False
+            SUB_JOB.finished_at = time.time()
+
+
+def sub_frame(path: str, t: float) -> Path:
+    """抽一帧给前端画字幕区域框。"""
+    out = WORK / "sub_frames" / (hashlib.md5(f"{path}|{t}".encode("utf-8")).hexdigest()[:16] + ".jpg")
+    if not out.exists():
+        out.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run([FFMPEG, "-y", "-ss", "%.2f" % max(0.0, t), "-i", path,
+                        "-frames:v", "1", "-q:v", "3", str(out)],
+                       capture_output=True, creationflags=NO_WINDOW, timeout=60)
+    if not out.exists():
+        raise RuntimeError("抽帧失败，无法预览")
+    return out
+
+
+def _kill_proc(proc) -> bool:
+    if not proc:
+        return False
+    try:
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                       capture_output=True, creationflags=NO_WINDOW)
+        return True
+    except Exception:  # noqa: BLE001
+        try:
+            proc.kill()
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+
 def pick_files() -> dict:
     """弹系统选择框。返回 {state, paths, message}；state 为 ok / cancel / busy / timeout / error。"""
     if not PICK_GUARD.acquire(blocking=False):
@@ -1652,8 +2065,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         u = urlparse(self.path)
         q = parse_qs(u.query)
-        if u.path in ("/", "/index.html"):
+        if u.path in ("/", "/home.html"):
+            self._file(WEB / "home.html", "text/html; charset=utf-8")
+        elif u.path in ("/cutter", "/index.html"):
             self._file(WEB / "index.html", "text/html; charset=utf-8")
+        elif u.path in ("/sub", "/sub.html"):
+            self._file(WEB / "sub.html", "text/html; charset=utf-8")
+        elif u.path in ("/hd", "/hd.html"):
+            self._file(WEB / "hd.html", "text/html; charset=utf-8")
         elif u.path == "/media":
             token = (q.get("token") or [""])[0]
             video = VIDEOS.get(token)
@@ -1702,6 +2121,27 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "任务不存在"}, 404)
             else:
                 self._json(job)
+        elif u.path == "/api/hd/info":
+            self._json({"ok": True, "video2x": V2X.exists(), "ffprobe": VU_FFPROBE.exists(),
+                        "out": str(VU_OUT), "gpus": hd_gpus(),
+                        "root": str(VU_ROOT)})
+        elif u.path == "/api/hd/status":
+            self._json(HD_JOB.snapshot())
+        elif u.path == "/api/sub/info":
+            self._json({"ok": True, "vsr": VSR_PY.exists() and VSR_RUN.exists(),
+                        "root": str(VSR_ROOT)})
+        elif u.path == "/api/sub/status":
+            self._json(SUB_JOB.snapshot())
+        elif u.path == "/api/sub/frame":
+            path = (q.get("path") or [""])[0]
+            ts = (q.get("t") or ["0"])[0]
+            if not Path(path).is_file():
+                self._json({"error": "文件不存在"}, 404)
+                return
+            try:
+                self._file(sub_frame(path, float(ts or 0)), "image/jpeg")
+            except Exception as exc:  # noqa: BLE001
+                self._json({"error": str(exc)}, 500)
         elif u.path in ("/pipeline", "/pipe.html"):
             self._file(WEB / "pipe.html", "text/html; charset=utf-8")
         elif u.path in ("/one", "/one.html"):
@@ -2151,6 +2591,83 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(res)
             else:
                 self._json({"error": res.get("error") or "打开失败"}, 404)
+            return
+
+        # ---------- 独立工具：视频变高清 ----------
+        if u.path == "/api/tool/pick":
+            res = pick_files()
+            self._json({"ok": res["state"] == "ok", "state": res["state"],
+                        "error": res["message"], "paths": res["paths"]})
+            return
+
+        if u.path == "/api/hd/probe":
+            try:
+                self._json({"ok": True, **tool_probe(payload.get("path", ""))})
+            except Exception as exc:  # noqa: BLE001
+                self._json({"error": str(exc)}, 400)
+            return
+
+        if u.path == "/api/hd/start":
+            if HD_JOB.running:
+                self._json({"error": "已有高清任务在跑"}, 409)
+                return
+            if not V2X.exists():
+                self._json({"error": "找不到 video2x：%s" % V2X}, 400)
+                return
+            inp = (payload.get("input") or "").strip().strip('"')
+            if not os.path.isfile(inp):
+                self._json({"error": "找不到这个文件：%s" % inp}, 400)
+                return
+            threading.Thread(target=hd_worker, args=(payload,), daemon=True).start()
+            self._json({"ok": True})
+            return
+
+        if u.path == "/api/hd/cancel":
+            ok = _kill_proc(HD_JOB.proc)
+            self._json({"ok": ok})
+            return
+
+        # ---------- 独立工具：字幕去除 ----------
+        if u.path == "/api/sub/probe":
+            try:
+                self._json({"ok": True, **tool_probe(payload.get("path", ""))})
+            except Exception as exc:  # noqa: BLE001
+                self._json({"error": str(exc)}, 400)
+            return
+
+        if u.path == "/api/sub/start":
+            if SUB_JOB.running:
+                self._json({"error": "已有去字幕任务在跑"}, 409)
+                return
+            if not (VSR_PY.exists() and VSR_RUN.exists()):
+                self._json({"error": "找不到 VSR：%s" % VSR_PY}, 400)
+                return
+            inp = (payload.get("input") or "").strip().strip('"')
+            if not os.path.isfile(inp):
+                self._json({"error": "找不到这个文件：%s" % inp}, 400)
+                return
+            area = (payload.get("area") or "").strip()
+            if area and area.lower() not in ("none", "null") \
+                    and not re.fullmatch(r"\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*\d+", area):
+                self._json({"error": "区域格式不对，应为 ymin,ymax,xmin,xmax"}, 400)
+                return
+            threading.Thread(target=sub_worker, args=(inp, area), daemon=True).start()
+            self._json({"ok": True})
+            return
+
+        if u.path == "/api/sub/cancel":
+            ok = _kill_proc(SUB_JOB.proc)
+            self._json({"ok": ok})
+            return
+
+        if u.path == "/api/tool/play":
+            f = (payload.get("path") or "").strip().strip('"')
+            if not os.path.isfile(f):
+                self._json({"error": "文件不存在：%s" % f}, 404)
+                return
+            _unlock_foreground()
+            os.startfile(f)  # noqa: S606
+            self._json({"ok": True, "path": f})
             return
 
         # ---------------- 成片流水线 ----------------

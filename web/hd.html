@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>视频变高清 · ShotCutter</title>
+<style>
+:root{
+  color-scheme:dark;
+  --bg:#131210; --panel:#1b1a18; --line:#2a2926; --line-2:#3a3831;
+  --ink:#eceae4; --muted:#a8a49b; --dim:#7e7a71;
+  --accent:#6b9aff; --accent-2:#242a3e; --ok:#5fd39a; --warn:#e5b05e; --bad:#f07d6e;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#3a3831;border-radius:5px;border:2px solid #131210}
+::-webkit-scrollbar-thumb:hover{background:#4a4740}
+::-webkit-scrollbar-track{background:transparent}
+::selection{background:rgba(107,154,255,.30)}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+header{position:sticky;top:0;z-index:30;background:rgba(19,18,16,.85);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.hw{max-width:1360px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.brand{display:flex;flex-direction:column;gap:1px}
+.brand h1{font-size:15px;margin:0;font-weight:650;letter-spacing:.2px}
+.brand p{margin:0;font-size:11.5px;color:var(--muted)}
+.sp{flex:1}
+.nav{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.nav .ng{font-size:10px;color:var(--dim);letter-spacing:1px;margin:0 3px 0 6px;user-select:none}
+.nav .ng:first-child{margin-left:0}
+.nav a{font-size:12.5px;padding:5px 13px;border-radius:999px;border:1px solid var(--line);background:#1b1a18;color:var(--muted);cursor:pointer;transition:.14s}
+.nav a:hover{color:var(--ink);border-color:var(--line-2);background:#201f1c}
+.nav a.on{background:var(--ink);color:#171614;border-color:var(--ink);font-weight:600}
+main{max-width:980px;margin:0 auto;padding:22px 20px 140px}
+.pagehead{margin-bottom:18px}
+.pagehead h2{margin:0 0 4px;font-size:20px;font-weight:650}
+.pagehead p{margin:0;font-size:12.5px;color:var(--muted)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:14px}
+.card h3{font-size:12.5px;margin:0 0 12px;font-weight:650;color:var(--muted);letter-spacing:.4px}
+.frow{display:flex;gap:8px}
+.frow input{flex:1;min-width:0;font:12.5px var(--mono);padding:8px 11px;border:1px solid var(--line-2);border-radius:9px;background:#201f1c;color:var(--ink);outline:none}
+.frow input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(107,154,255,.13)}
+button.b{font:inherit;font-size:13px;padding:8px 14px;border-radius:9px;border:1px solid var(--ink);background:var(--ink);color:#171614;cursor:pointer;transition:.15s;font-weight:600}
+button.b:hover{opacity:.86}
+button.b:disabled{opacity:.4;cursor:not-allowed}
+button.g{font:inherit;font-size:13px;padding:8px 14px;border-radius:9px;border:1px solid var(--line-2);background:#1b1a18;color:var(--ink);cursor:pointer}
+button.g:hover{background:#201f1c}
+button.g:disabled{opacity:.45;cursor:not-allowed}
+button.g.on{background:var(--accent-2);border-color:#3d517e;color:#9db9ff;font-weight:600}
+.info{margin-top:10px;font:11.5px var(--mono);color:var(--muted);line-height:1.7}
+.info b{color:var(--ink);font-weight:600}
+.info .tgt{color:var(--accent)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:720px){.grid2{grid-template-columns:1fr}}
+label.f{display:block;font-size:11.5px;color:var(--muted);margin-bottom:5px}
+select{width:100%;font:inherit;font-size:12.5px;padding:8px 10px;border:1px solid var(--line-2);border-radius:9px;background:#201f1c;color:var(--ink);outline:none}
+select:focus{border-color:var(--accent)}
+.seg{display:flex;background:#201f1c;border:1px solid var(--line);border-radius:9px;padding:3px;gap:2px}
+.seg button{flex:1;border:0;background:transparent;padding:7px 4px;border-radius:7px;color:var(--muted);font-size:12.5px;cursor:pointer;transition:.13s}
+.seg button:hover{color:var(--ink)}
+.seg button.on{background:#3a3831;color:#eceae4;box-shadow:0 1px 3px rgba(0,0,0,.45);font-weight:600}
+.hint{font-size:11.5px;color:var(--dim);margin-top:7px;line-height:1.55}
+input[type=number]{width:90px;font:12.5px var(--mono);padding:7px 9px;border:1px solid var(--line-2);border-radius:8px;background:#201f1c;color:var(--ink);outline:none}
+.qrow{display:flex;align-items:center;gap:10px}
+.qrow .ql{font-size:12.5px;color:var(--muted)}
+.qrow .qv{font:11px var(--mono);color:var(--dim)}
+.warn{font-size:11.5px;color:var(--warn);line-height:1.6;margin-top:10px}
+.prog-wrap{display:none}
+.prog-wrap.on{display:block}
+.pbar{height:6px;background:#2b2926;border-radius:3px;overflow:hidden}
+.pbar i{display:block;height:100%;background:var(--accent);width:0;transition:width .3s;border-radius:3px}
+.pmeta{display:flex;gap:16px;flex-wrap:wrap;margin-top:9px;font:11.5px var(--mono);color:var(--muted)}
+.pmeta b{color:var(--ink);font-weight:600}
+.pmeta .ph{color:var(--accent)}
+.log{margin-top:12px;background:#171614;border:1px solid var(--line);border-radius:10px;padding:10px 12px;max-height:200px;overflow:auto;font:11px var(--mono);color:#b3afa6;line-height:1.65;white-space:pre-wrap;word-break:break-all}
+.result{display:none;margin-top:14px;background:var(--accent-2);border:1px solid #3d517e;border-radius:12px;padding:12px 14px;align-items:center;gap:10px;flex-wrap:wrap}
+.result.on{display:flex}
+.result .rn{font-size:12.5px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:46%}
+.result .rn b{color:#9db9ff}
+.result .sp{flex:1}
+footer{position:fixed;bottom:0;left:0;right:0;z-index:30;background:rgba(24,23,21,.92);backdrop-filter:blur(10px);border-top:1px solid var(--line)}
+.fw{max-width:980px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.msg{font-size:12px;color:var(--muted)}
+.msg.err{color:var(--bad)}
+.msg.ok{color:var(--ok)}
+.gpuchip{font:10.5px var(--mono);color:var(--dim);margin-top:6px}
+</style>
+</head>
+<body>
+<header>
+  <div class="hw">
+    <div class="brand">
+      <h1>视频变高清</h1>
+      <p>AI 超分放大 + RIFE 补帧 · 全部在本机 GPU 上跑</p>
+    </div>
+    <div class="sp"></div>
+    <nav class="nav">
+      <span class="ng">工具</span>
+      <a href="/cutter">镜头切割器</a>
+      <a href="/sub">字幕去除</a>
+      <a href="/hd" class="on">视频变高清</a>
+      <span class="ng">生成</span>
+      <a href="/one">一键出片</a>
+      <a href="/pipeline">流水线</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="pagehead">
+    <h2>视频变高清</h2>
+    <p>720p 选 3x 正好 4K，1080p 选 2x。先拿 15 秒样片试，别一上来跑整片。</p>
+  </div>
+
+  <div class="card">
+    <h3>素材</h3>
+    <div class="frow">
+      <input id="input" placeholder="粘贴视频路径，或点右边选择">
+      <button class="g" id="btnBrowse">浏览</button>
+    </div>
+    <div class="info" id="info">还没选视频</div>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h3>处理引擎</h3>
+      <label class="f">引擎</label>
+      <select id="processor">
+        <option value="realesrgan">Real-ESRGAN · 通用首选</option>
+        <option value="realcugan">Real-CUGAN · 动漫/降噪</option>
+        <option value="libplacebo">Anime4K · 极快实时着色器</option>
+      </select>
+      <div style="height:10px"></div>
+      <label class="f">模型</label>
+      <select id="model"></select>
+      <div class="hint" id="modelHint"></div>
+    </div>
+
+    <div class="card">
+      <h3>放大与插帧</h3>
+      <label class="f">放大倍数</label>
+      <div class="seg" id="factorSeg">
+        <button data-v="2">2x</button>
+        <button data-v="3" class="on">3x</button>
+        <button data-v="4">4x</button>
+      </div>
+      <div class="hint" id="target">选择视频后显示目标分辨率</div>
+      <div style="height:12px"></div>
+      <label class="f">画面插帧（RIFE）</label>
+      <div class="seg" id="interpSeg">
+        <button data-v="1" class="on">不插帧</button>
+        <button data-v="2">2x</button>
+        <button data-v="4">4x</button>
+      </div>
+      <div class="hint">补帧让画面更顺滑，但要多跑一遍，总耗时约翻倍。</div>
+      <div style="height:10px"></div>
+      <label class="f">RIFE 模型</label>
+      <select id="rifeModel">
+        <option value="rife-v4.6">RIFE 4.6 · 通用</option>
+        <option value="rife-v4.25-lite">RIFE 4.25 lite · 轻量</option>
+        <option value="rife-v4.26">RIFE 4.26 · 较新</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h3>编码与画质</h3>
+      <label class="f">编码器</label>
+      <select id="codec">
+        <option value="hevc_nvenc">HEVC 显卡加速 · 推荐</option>
+        <option value="h264_nvenc">H.264 显卡加速 · 兼容好</option>
+        <option value="libx264">H.264 软编 · 画质优先</option>
+        <option value="libx265">HEVC 软编 · 极限压缩</option>
+      </select>
+      <div style="height:12px"></div>
+      <div class="qrow">
+        <span class="ql">画质</span>
+        <input type="number" id="quality" value="20" min="14" max="32" step="1">
+        <span class="qv" id="qhint">cq 20 = 平衡 · 17 接近无损（软编为 CRF）</span>
+      </div>
+      <div class="gpuchip" id="gpuInfo"></div>
+    </div>
+
+    <div class="card">
+      <h3>进度</h3>
+      <div class="prog-wrap" id="progWrap">
+        <div class="pbar"><i id="pfill"></i></div>
+        <div class="pmeta">
+          <span class="ph" id="pphase">准备中</span>
+          <span>帧 <b id="pframe">0</b>/<b id="ptotal">0</b></span>
+          <span><b id="pfps">0</b> fps</span>
+          <span>剩余 <b id="peta">--</b></span>
+          <span>已用 <b id="pelapsed">--</b></span>
+          <span><b id="ppct">0</b>%</span>
+        </div>
+        <div class="log" id="log"></div>
+      </div>
+      <div class="hint" id="progIdle">还没开始。选好视频、确认参数后点下面的「开始处理」。</div>
+      <div class="result" id="result">
+        <span class="rn">输出：<b id="rname">-</b></span>
+        <span class="sp"></span>
+        <button class="g" id="btnPlay">播放</button>
+        <button class="g" id="btnReveal">在文件夹中显示</button>
+        <button class="g" id="btnOutdir">打开输出目录</button>
+      </div>
+      <div class="warn" id="warnBox" hidden></div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="fw">
+    <button class="b" id="btnStart" style="min-width:128px">开始处理</button>
+    <button class="g" id="btnCancel" disabled>取消</button>
+    <span class="msg" id="msg"></span>
+  </div>
+</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+const state = { factor: 3, interp: 1, video: null, out: "", running: false, timer: null };
+
+const MODELS = {
+  realesrgan: [
+    ['realesr-animevideov3', 'realesr-animevideov3 · 视频专用，时序最稳'],
+    ['realesrgan-plus', 'realesrgan-plus · 单图通用，细节更锐'],
+    ['realesrgan-plus-anime', 'realesrgan-plus-anime · 动漫特化']
+  ],
+  realcugan: [
+    ['models-pro', 'models-pro · 效果最好，速度中等'],
+    ['models-se', 'models-se · 降噪更激进'],
+    ['models-nose', 'models-nose · 不降噪，保留原噪点']
+  ],
+  libplacebo: [
+    ['anime4k-v4-a+a', 'anime4k-v4-a+a · 画质模式'],
+    ['anime4k-v4-b+b', 'anime4k-v4-b+b · 更锐利'],
+    ['anime4k-v4.1-gan', 'anime4k-v4.1-gan · GAN 增强']
+  ]
+};
+const HINTS = {
+  realesrgan: '视频一律优先 animevideov3 —— 按视频训练，逐帧处理不会明暗"呼吸"闪烁。',
+  realcugan: '动漫、番剧首选，线条保真最高；真人实拍会显得过于平滑。',
+  libplacebo: '纯 GPU 着色器，快十倍以上，只是变锐不补细节，适合快速预览。'
+};
+
+function setMsg(t, cls){ const m = $("#msg"); m.textContent = t || ''; m.className = "msg " + (cls||""); }
+
+async function api(path, body){
+  const opt = body ? {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)} : {};
+  const r = await fetch(path, opt);
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.error || ("请求失败 " + r.status));
+  return j;
+}
+
+function fillModels(){
+  const p = $("#processor").value;
+  const sel = $("#model");
+  sel.innerHTML = "";
+  MODELS[p].forEach(([v, t]) => {
+    const o = document.createElement("option");
+    o.value = v; o.textContent = t;
+    sel.appendChild(o);
+  });
+  $("#modelHint").textContent = HINTS[p];
+}
+
+function segWire(id, key, after){
+  const el = document.getElementById(id);
+  el.addEventListener("click", e => {
+    const b = e.target.closest("button[data-v]");
+    if(!b) return;
+    el.querySelectorAll("button").forEach(x => x.classList.remove("on"));
+    b.classList.add("on");
+    state[key] = +b.dataset.v;
+    if(after) after();
+  });
+}
+
+function paintTarget(){
+  const v = state.video;
+  const t = $("#target");
+  if(!v || !v.width){ t.textContent = "选择视频后显示目标分辨率"; return; }
+  const w = v.width * state.factor, h = v.height * state.factor;
+  const tag = (w >= 3600 || h >= 2000) ? "（8K 级，慎重）" : (w >= 3400 || h >= 1900) ? "（4K 级）" : "";
+  t.textContent = `${v.width}×${v.height} → ${w}×${h}${tag} · ${v.fps}fps` + (state.interp > 1 ? ` → ${(v.fps*state.interp).toFixed(1)}fps` : "");
+}
+
+async function probe(){
+  const p = $("#input").value.trim();
+  if(!p) return;
+  setMsg("读取视频信息…");
+  try{
+    const v = await api("/api/hd/probe", {path: p});
+    state.video = v;
+    $("#info").innerHTML =
+      `<b>${v.name}</b> · ${v.width}×${v.height} · ${v.fps}fps · ${v.codec} · ${v.duration_text} · ${v.size_mb} MB`;
+    paintTarget();
+    setMsg("");
+  }catch(e){
+    state.video = null;
+    $("#info").textContent = "读取失败";
+    setMsg(e.message, "err");
+  }
+}
+
+async function pick(){
+  setMsg("打开选择窗口…");
+  try{
+    const r = await api("/api/tool/pick", {});
+    if(r.state === "busy" || r.state === "timeout"){ setMsg(r.error, "err"); return; }
+    if(r.state !== "ok") { setMsg(""); return; }
+    if(r.paths && r.paths[0]){
+      $("#input").value = r.paths[0];
+      probe();
+    }
+  }catch(e){ setMsg(e.message, "err"); }
+}
+
+function paint(st){
+  state.running = st.running;
+  $("#progWrap").classList.toggle("on", st.running || !!st.output || !!st.error);
+  $("#progIdle").style.display = (st.running || st.output || st.error) ? "none" : "";
+  $("#pfill").style.width = (st.percent || 0) + "%";
+  $("#ppct").textContent = Math.round(st.percent || 0);
+  $("#pphase").textContent = st.phase || "";
+  $("#pframe").textContent = st.frame || 0;
+  $("#ptotal").textContent = st.total || 0;
+  $("#pfps").textContent = st.fps || 0;
+  $("#peta").textContent = st.eta || "--";
+  $("#pelapsed").textContent = st.elapsed || "--";
+  const lines = st.lines || [];
+  const atBottom = $("#log").scrollTop + $("#log").clientHeight >= $("#log").scrollHeight - 30;
+  $("#log").textContent = lines.join("\n");
+  if(atBottom) $("#log").scrollTop = $("#log").scrollHeight;
+  $("#btnStart").disabled = st.running;
+  $("#btnCancel").disabled = !st.running;
+  const done = !st.running && st.output && (st.percent >= 100 || st.phase === "已完成");
+  $("#result").classList.toggle("on", !!done);
+  if(done){
+    state.out = st.output;
+    $("#rname").textContent = st.output.split(/[\\/]/).pop();
+    setMsg("完成", "ok");
+  } else if(st.error){
+    setMsg(st.error, "err");
+  } else if(st.running){
+    setMsg(st.phase || "处理中…");
+  }
+}
+
+async function poll(){
+  try{
+    const st = await api("/api/hd/status");
+    paint(st);
+  }catch(e){ /* 服务重启等，下轮再试 */ }
+}
+
+async function start(){
+  const inp = $("#input").value.trim();
+  if(!inp){ setMsg("先选一个视频", "err"); return; }
+  if(!state.video){ await probe(); if(!state.video) return; }
+  const p = {
+    input: inp,
+    processor: $("#processor").value,
+    model: $("#model").value,
+    factor: state.factor,
+    interp_factor: state.interp,
+    rife_model: $("#rifeModel").value,
+    codec: $("#codec").value,
+    quality: +$("#quality").value || 20
+  };
+  setMsg("启动…");
+  try{
+    await api("/api/hd/start", p);
+    $("#result").classList.remove("on");
+    $("#log").textContent = "";
+    setMsg("已启动");
+  }catch(e){ setMsg(e.message, "err"); }
+}
+
+async function cancel(){
+  try{ await api("/api/hd/cancel", {}); setMsg("已发送取消，等进程退出…"); }
+  catch(e){ setMsg(e.message, "err"); }
+}
+
+$("#btnBrowse").addEventListener("click", pick);
+$("#input").addEventListener("change", probe);
+$("#input").addEventListener("keydown", e => { if(e.key === "Enter") probe(); });
+$("#processor").addEventListener("change", fillModels);
+$("#btnStart").addEventListener("click", start);
+$("#btnCancel").addEventListener("click", cancel);
+$("#btnPlay").addEventListener("click", async () => {
+  if(state.out) await api("/api/tool/play", {path: state.out}).catch(e => setMsg(e.message, "err"));
+});
+$("#btnReveal").addEventListener("click", async () => {
+  if(state.out) await api("/api/openfolder", {path: state.out}).catch(e => setMsg(e.message, "err"));
+});
+$("#btnOutdir").addEventListener("click", async () => {
+  const r = await api("/api/hd/info").catch(() => null);
+  if(r && r.out) await api("/api/openfolder", {path: r.out}).catch(e => setMsg(e.message, "err"));
+});
+
+segWire("factorSeg", "factor", paintTarget);
+segWire("interpSeg", "interp", paintTarget);
+fillModels();
+
+(async function init(){
+  const info = await api("/api/hd/info").catch(() => null);
+  if(info){
+    if(info.gpus && info.gpus.length){
+      $("#gpuInfo").textContent = "GPU：" + info.gpus.map(g => g.name).join(" · ");
+    } else {
+      $("#gpuInfo").textContent = "没探测到 GPU，将走 CPU（非常慢）";
+    }
+    if(!info.video2x){
+      const w = $("#warnBox"); w.hidden = false;
+      w.textContent = "找不到 video2x 引擎：" + info.root + " —— 请确认 VideoUpscaler 目录还在。";
+    }
+  }
+  poll();
+  state.timer = setInterval(poll, 1200);
+})();
+</script>
+</body>
+</html>
