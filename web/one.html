@@ -46,7 +46,9 @@ main{max-width:1360px;margin:0 auto;padding:20px}
 .step.done .n{color:var(--ok)}
 .step.done .n::after{content:" ✓"}
 .card{background:#EDE9DE;border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:14px}
-.card h2{font-size:13px;margin:0 0 12px;font-weight:650;letter-spacing:.3px;text-transform:none}
+.card h2{display:flex;align-items:baseline;gap:13px;flex-wrap:wrap;font-family:var(--display);font-size:21px;font-weight:600;margin:0 0 14px;letter-spacing:.01em}
+.card h2 .ch-no{font-family:var(--mono);font-size:13.5px;color:var(--accent);font-weight:400;letter-spacing:.06em}
+.card h2 .hint{margin-left:auto}
 .plan-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
 .plan-card{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:#EDE9DE;display:flex;flex-direction:column}
 .plan-card.hot{border:2px solid #CE8465;background:#EFE0D8}
@@ -60,7 +62,7 @@ main{max-width:1360px;margin:0 auto;padding:20px}
 .plan-card .why{font-size:11.5px;color:var(--muted);margin-top:7px}
 .plan-card .warn{font-size:11.5px;color:var(--warn);margin-top:7px}
 .plan-card .acts{display:flex;gap:6px;margin-top:11px}
-.card h2 .hint{font-weight:400;color:var(--muted);font-size:11.5px;margin-left:8px}
+.card h2 .hint{font-weight:400;color:var(--muted);font-size:11.5px}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .agroup{margin:2px 0 6px}
 .agroup .gname{font-size:11px;color:var(--dim);margin-bottom:4px;letter-spacing:.4px}
@@ -350,7 +352,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
 
 <main>
   <div class="card" id="one-card">
-    <h2>素材 <span class="hint">丢文件夹 → 自动体检 → 摘句/写稿 → 出方案；素材里得有人声，空镜会自动穿插</span></h2>
+    <h2><span class="ch-no">01</span>素材与方案 <span class="hint">丢文件夹 → 自动体检 → 摘句/写稿 → 出方案；素材里得有人声，空镜会自动穿插</span></h2>
     <div class="grid2">
       <div>
         <label class="f">素材文件夹（一行一个，递归扫描；口播原片和空镜可以放一起）</label>
@@ -410,7 +412,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
   </div>
 
   <div class="card" id="bgm-card">
-    <h2>背景音乐 <span class="hint">口播是主音轨，BGM 自动压低；曲子比视频短会自动循环</span></h2>
+    <h2><span class="ch-no">02</span>背景音乐 <span class="hint">口播是主音轨，BGM 自动压低；曲子比视频短会自动循环</span></h2>
     <div class="row">
       <input type="text" id="bgm-q" placeholder="搜曲名…" style="flex:1;min-width:160px">
       <button class="g sm" id="btn-bgm-add">加音乐文件夹</button>
@@ -455,7 +457,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
   </div>
 
   <div class="card" id="res-card" hidden>
-    <h2>出片结果 <span class="hint">渲染完自动出片、自动体检，下面直接看</span></h2>
+    <h2><span class="ch-no">03</span>出片结果 <span class="hint">渲染完自动出片、自动体检，下面直接看</span></h2>
     <div class="hintline" id="res-sum" style="margin-bottom:8px"></div>
     <div id="res-list" style="line-height:1.8"></div>
     <div class="row" style="margin-top:12px">
@@ -464,7 +466,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
   </div>
 
   <div class="card" id="out-card" hidden>
-    <h2>成片播放 <span class="hint">点下面列表里的任意一条切换</span></h2>
+    <h2><span class="ch-no">04</span>成片播放 <span class="hint">点下面列表里的任意一条切换</span></h2>
     <div class="row" style="align-items:flex-start;gap:18px">
       <video class="prev" id="out-video" controls playsinline></video>
       <div style="flex:1;min-width:220px">
@@ -483,7 +485,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
   </div>
 
   <div class="card" id="outlist-card" hidden>
-    <h2>成片列表 <span class="hint" id="ol-sum"></span><span class="hint" style="margin-left:8px">按生成时间排，新的在前</span></h2>
+    <h2><span class="ch-no">05</span>成片列表 <span class="hint" id="ol-sum"></span><span class="hint" style="margin-left:8px">按生成时间排，新的在前</span></h2>
     <div style="margin-top:10px;max-height:46vh;overflow:auto">
       <table class="shots ol">
         <thead><tr>
