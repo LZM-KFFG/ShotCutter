@@ -28,6 +28,9 @@ header{position:sticky;top:0;z-index:30;background:rgba(245,242,235,.88);backdro
 .hw{max-width:1360px;margin:0 auto;padding:10px 20px;display:flex;align-items:center;gap:16px}
 .brand h1{font-size:15px;margin:0;font-weight:650;letter-spacing:.2px}
 .brand p{margin:1px 0 0;font-size:11.5px;color:var(--muted)}
+.crumb{margin:0 0 3px;font-size:11.5px;letter-spacing:.04em;color:var(--dim)}
+.crumb a{color:var(--muted);text-decoration:none;border-bottom:1px solid var(--line-2);padding-bottom:1px;transition:.14s}
+.crumb a:hover{color:var(--accent);border-color:var(--accent)}
 .sp{flex:1}
 .nav{display:flex;gap:6px}
 .nav .ng{font-size:10px;color:var(--dim);letter-spacing:1px;margin:0 3px 0 6px;user-select:none}
@@ -309,19 +312,11 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
 <header>
   <div class="hw">
     <div class="brand">
+      <p class="crumb"><a href="/">← 目次</a></p>
       <h1>成片流水线</h1>
       <p>打标 → 脚本 → 配音 → 对齐 → 合成 · 全部在本机运行</p>
     </div>
     <div class="sp"></div>
-    <div class="nav">
-      <span class="ng">工具</span>
-      <a href="/cutter">镜头切割器</a>
-      <a href="/sub">字幕去除</a>
-      <a href="/hd">视频变高清</a>
-      <span class="ng">生成</span>
-      <a href="/one">一键出片</a>
-      <a href="/pipeline" class="on">流水线</a>
-    </div>
     <div class="nav">
       <span class="chip" id="chip-llm" title="大模型状态">模型…</span>
       <button id="btn-cfg">设置</button>

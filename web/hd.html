@@ -29,6 +29,9 @@ header{position:sticky;top:0;z-index:30;background:rgba(245,242,235,.88);backdro
 .brand{display:flex;flex-direction:column;gap:1px}
 .brand h1{font-size:15px;margin:0;font-weight:650;letter-spacing:.2px}
 .brand p{margin:0;font-size:11.5px;color:var(--muted)}
+.crumb{margin:0 0 3px;font-size:11.5px;letter-spacing:.04em;color:var(--dim)}
+.crumb a{color:var(--muted);text-decoration:none;border-bottom:1px solid var(--line-2);padding-bottom:1px;transition:.14s}
+.crumb a:hover{color:var(--accent);border-color:var(--accent)}
 .sp{flex:1}
 .nav{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .nav .ng{font-size:10px;color:var(--dim);letter-spacing:1px;margin:0 3px 0 6px;user-select:none}
@@ -101,19 +104,11 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
 <header>
   <div class="hw">
     <div class="brand">
+      <p class="crumb"><a href="/">← 目次</a></p>
       <h1>视频变高清</h1>
       <p><b style="color:var(--accent);font-family:var(--mono);font-size:10px;letter-spacing:.26em">TOOL · 03&nbsp;&nbsp;</b>AI 超分放大 + RIFE 补帧 · 全部在本机 GPU 上跑</p>
     </div>
     <div class="sp"></div>
-    <nav class="nav">
-      <span class="ng">工具</span>
-      <a href="/cutter">镜头切割器</a>
-      <a href="/sub">字幕去除</a>
-      <a href="/hd" class="on">视频变高清</a>
-      <span class="ng">生成</span>
-      <a href="/one">一键出片</a>
-      <a href="/pipeline">流水线</a>
-    </nav>
   </div>
 </header>
 
