@@ -172,6 +172,22 @@ button.sm{font-size:12px;padding:5px 10px}
 .ol th.srt.on .arr{opacity:1}
 .ol .kb{font:11px var(--mono);color:var(--muted);white-space:nowrap}
 .ol .kb.hi{color:var(--ink)}
+/* 成片体检：列表里的分数徽标 + 详情面板 */
+.qcb{display:inline-flex;align-items:center;gap:3px;font:11px var(--mono);padding:1px 7px;border-radius:999px;
+  border:1px solid var(--line);background:#f4f3ef;color:var(--dim);white-space:nowrap;cursor:pointer}
+.qcb:hover{border-color:var(--line-2);color:var(--ink)}
+.qcb.ok{background:#eaf7ef;color:#1a7f4b;border-color:#cfe9d8}
+.qcb.warn{background:#fdf6e7;color:var(--warn);border-color:#f0e2c4}
+.qcb.bad{background:#fdf0ee;color:var(--bad);border-color:#f3d6d2}
+/* 体检面板头里的徽标：.health .hh span 会把颜色压成灰的，这里提权 */
+.health .hh .qcb{font-family:var(--mono);color:var(--dim);background:#f4f3ef;border-color:var(--line)}
+.health .hh .qcb.ok{color:#1a7f4b;background:#eaf7ef;border-color:#cfe9d8}
+.health .hh .qcb.warn{color:var(--warn);background:#fdf6e7;border-color:#f0e2c4}
+.health .hh .qcb.bad{color:var(--bad);background:#fdf0ee;border-color:#f3d6d2}
+#qc-box{margin-top:12px}
+#qc-box .health{margin-bottom:0}
+.qc-meta{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line-2);
+  font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
 .kpi{display:flex;gap:22px;flex-wrap:wrap;margin-bottom:4px}
 .kpi div{font-size:12px;color:var(--muted)}
 .kpi b{display:block;font-size:19px;color:var(--ink);font-weight:650;letter-spacing:-.3px}
@@ -204,6 +220,8 @@ video.prev{width:100%;max-width:340px;border-radius:10px;background:#000;display
 .pi.sel img{opacity:.8}
 .pi .cb{position:absolute;top:4px;left:4px;width:16px;height:16px;accent-color:var(--accent);cursor:pointer;z-index:3;margin:0}
 #folder{width:100%;font:12px var(--mono);min-height:64px;resize:vertical;line-height:1.5}
+/* 拖文件夹进来时给个反馈 */
+#folder.drag-on{border-color:var(--accent);background:var(--accent-2)}
 .seltools{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px;padding:6px 10px;
   background:#fafaf7;border:1px solid var(--line);border-radius:9px}
 .seltools[hidden]{display:none}
@@ -275,6 +293,7 @@ body.has-fab main{padding-bottom:76px}
     <div class="sp"></div>
     <div class="nav">
       <span class="chip" id="chip-llm" title="大模型状态">模型…</span>
+      <a href="/one">⚡ 一键出片</a>
       <a href="/">← 镜头切割器</a>
       <button id="btn-cfg">设置</button>
     </div>
@@ -420,7 +439,8 @@ body.has-fab main{padding-bottom:76px}
       <div class="row" style="margin-top:14px">
         <div style="width:150px"><label class="f">目标时长</label>
           <select id="p-target">
-            <option value="15">15 秒</option><option value="22">22 秒</option>
+            <option value="10">10 秒</option><option value="15">15 秒</option><option value="20">20 秒</option>
+            <option value="22">22 秒</option>
             <option value="30" selected>30 秒</option><option value="45">45 秒</option><option value="60">60 秒</option>
           </select></div>
         <div style="flex:1;min-width:300px"><label class="f">风格（选几个就出几条脚本，鼠标停上去看适合什么）</label>
@@ -527,11 +547,13 @@ body.has-fab main{padding-bottom:76px}
           <div class="row">
             <button class="g sm" id="btn-outdir">打开成片文件夹</button>
             <button class="g sm" id="btn-csv">打开分镜表</button>
+            <button class="g sm" id="btn-qc" title="查黑边、字幕超宽、静音段、音量、首尾黑场、码率">体检这条</button>
             <a class="g sm" id="btn-dl" download style="text-decoration:none;display:inline-block">下载</a>
             <button class="g sm" id="btn-outdel" title="删掉这条成片以及它的分镜表、字幕、配音、项目记录（进回收站）">删除成片</button>
           </div>
         </div>
       </div>
+      <div id="qc-box" hidden></div>
     </div>
 
     <div class="card" id="outlist-card" hidden>
@@ -541,6 +563,8 @@ body.has-fab main{padding-bottom:76px}
         <button class="g sm" id="btn-ol-none">全不选</button>
         <span class="hintline" id="ol-cnt">已选 0 / 0 条</span>
         <button class="b sm" id="btn-ol-dl">批量下载</button>
+        <button class="g sm" id="btn-ol-qc" title="查黑边、字幕超宽、静音段、音量、首尾黑场、码率">体检所选</button>
+        <button class="g sm" id="btn-ol-qcall" title="整张列表都体检一遍，跑完自动刷新分数">全部体检</button>
         <button class="g sm" id="btn-ol-del">删除所选</button>
         <button class="g sm" id="btn-ol-dir">打开文件夹</button>
         <span class="hintline" id="ol-msg"></span>
@@ -557,6 +581,7 @@ body.has-fab main{padding-bottom:76px}
             <th class="srt" data-k="size" style="width:66px">体积<span class="arr"></span></th>
             <th class="srt" data-k="kbps" style="width:78px">码率<span class="arr"></span></th>
             <th class="srt" data-k="clips" style="width:48px">镜头<span class="arr"></span></th>
+            <th class="srt" data-k="qc" style="width:70px">体检<span class="arr"></span></th>
             <th class="srt" data-k="mtime" style="width:112px">生成时间<span class="arr"></span></th>
             <th style="width:120px"></th>
           </tr></thead>
@@ -748,8 +773,13 @@ function toast(msg, ms=2400, act){
   clearTimeout(t._h);
   t._h = setTimeout(()=>t.classList.remove("on","act"), ms);
 }
-async function api(u, body, _retried){
-  const opt = body===undefined ? {} : {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)};
+/* 打开文件夹统一走这里：目标不在了会提示实际打开了哪一级，避免「打开的文件夹不对」 */
+async function openFolder(path){
+  const r = await api("/api/openfolder", {path: path || ""});
+  if(r.error){ toast(r.error, 4000); return; }
+  if(r.fallback){ toast("目标不在了，已打开上级目录：" + r.path, 5000); }
+}
+async function api(u, body, _retried){  const opt = body===undefined ? {} : {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)};
   let j;
   try{
     const r = await fetch(u, opt);
@@ -782,7 +812,7 @@ async function apiQuick(u, ms){
   }finally{ clearTimeout(t); }
 }
 /* ---------- 长任务控制条（打标 / 去字幕 / 批量出片） ---------- */
-const JC_KINDS = {tag:"打标", desub:"去字幕", batch:"批量出片", scan:"扫描素材", script:"写脚本", tts:"配音", compose:"合成", dedup:"素材去重"};
+const JC_KINDS = {tag:"打标", desub:"去字幕", batch:"批量出片", scan:"扫描素材", script:"写脚本", tts:"配音", compose:"合成", dedup:"素材去重", qc:"成片体检"};
 let JCID = null, JCPAUSE = false;
 function jcPaint(j){
   $("#jc-kind").textContent = JC_KINDS[j.kind] || "任务";
@@ -1181,7 +1211,9 @@ function saveFolders(){
 $("#folder").addEventListener("input", saveFolders);
 $("#btn-dir").onclick = async ()=>{
   $("#scan-msg").textContent = "正在打开选择窗口…";
-  const r = await api("/api/pipe/dialog", {});
+  // 从已经填好的最后一个目录打开，别每次都跳回桌面
+  const pre = folderLines();
+  const r = await api("/api/pipe/dialog", {path: pre.length ? pre[pre.length - 1] : ""});
   if(r.state === "ok"){
     const cur = folderLines();
     if(!cur.includes(r.path)) cur.push(r.path);
@@ -1191,6 +1223,63 @@ $("#btn-dir").onclick = async ()=>{
   }
   else $("#scan-msg").textContent = r.message || "";
 };
+
+function oneLines(){ /* 一键出片已独立成 /one 页，这里读它的持久化目录只为拖拽解析提供「已知目录」 */
+  return (localStorage.getItem("pipe_one_folders") || "").split("\n").map(s=>s.trim()).filter(Boolean);
+}
+
+/* ---------- 拖文件夹进目录框 ----------
+   浏览器出于安全不给拖入文件夹的绝对路径，只给名字。
+   所以拖进来后把名字发给后端：先在上次用过的目录附近找同名目录，
+   找不到就浅扫盘符；再找不到就自动弹原生选择框，选中即算补上。 */
+function setupFolderDrop(ta, msgEl, key){
+  if(!ta) return;
+  ["dragenter","dragover"].forEach(ev=> ta.addEventListener(ev, e=>{
+    if(![...(e.dataTransfer.types || [])].includes("Files")) return;
+    e.preventDefault();
+    ta.classList.add("drag-on");
+  }));
+  ta.addEventListener("dragleave", ()=> ta.classList.remove("drag-on"));
+  ta.addEventListener("drop", async e=>{
+    e.preventDefault();
+    ta.classList.remove("drag-on");
+    if(![...(e.dataTransfer.types || [])].includes("Files")) return;
+    const entries = [...(e.dataTransfer.items || [])]
+      .map(i=> i.webkitGetAsEntry && i.webkitGetAsEntry()).filter(Boolean);
+    const dirs = entries.filter(x=>x.isDirectory).map(x=>x.name);
+    if(!dirs.length){
+      toast("拖「文件夹」才行（里面放视频）；单个文件收不了，浏览器不给完整路径", 6000);
+      return;
+    }
+    if(msgEl) msgEl.textContent = "正在找拖进来的目录…";
+    const known = [...new Set([...oneLines(), ...folderLines()])];
+    const r = await api("/api/pipe/resolve", {names: dirs, known});
+    const cur = (ta.value || "").split("\n").map(s=>s.trim()).filter(Boolean);
+    const added = [], notes = [];
+    (dirs || []).forEach(nm=>{
+      const hits = (r.found && r.found[nm]) || [];
+      if(!hits.length) return;
+      if(!cur.includes(hits[0])){ cur.push(hits[0]); added.push(hits[0]); }
+      if(hits.length > 1) notes.push("「" + nm + "」有 " + hits.length + " 个同名目录，用了最近动过的那个");
+    });
+    if(added.length){
+      ta.value = cur.join("\n");
+      localStorage.setItem(key, ta.value);
+      if(msgEl) msgEl.textContent = "已加入：" + added.join("　");
+      if(notes.length) toast(notes[0] + "；不对就点「选择文件夹」重选", 6000);
+      return;
+    }
+    // 没定位到：退回原生选择框，起点用上次用过的目录
+    if(msgEl) msgEl.textContent = "拖进来的目录没定位到，弹了选择窗口";
+    const d = await api("/api/pipe/dialog", {path: known.length ? known[known.length - 1] : ""});
+    if(d.state === "ok"){
+      if(!cur.includes(d.path)) cur.push(d.path);
+      ta.value = cur.join("\n");
+      localStorage.setItem(key, ta.value);
+      if(msgEl) msgEl.textContent = "已加入：" + d.path;
+    } else if(msgEl) msgEl.textContent = d.message || "";
+  });
+}
 $("#btn-scan").onclick = async ()=>{
   const folders = folderLines();
   if(!folders.length){ toast("先填或选至少一个文件夹"); return; }
@@ -1212,8 +1301,7 @@ $("#btn-addvid").onclick = async ()=>{
   const r = await api("/api/pipe/addvideo", {token:v});
   if(r.error) toast(r.error); else { toast("导入 " + r.added + " 个镜头"); loadPool(); }
 };
-$("#btn-tag").onclick = ()=> doTag(false);
-$("#btn-tagall").onclick = ()=> doTag(true);
+$("#btn-tag").onclick = ()=> doTag(false);$("#btn-tagall").onclick = ()=> doTag(true);
 
 /* ---------- 去硬字幕（VSR） ---------- */
 let DSINFO = null;
@@ -1345,7 +1433,9 @@ async function runDesub(body, btn){
 }
 $("#btn-ds-dir").onclick = async ()=>{
   $("#ds-msg").textContent = "正在打开选择窗口…";
-  const r = await api("/api/pipe/dialog", {});
+  const cur0 = $("#ds-folders").value.split("\n").map(s=>s.trim()).filter(Boolean);
+  // 从已经填好的最后一个目录打开，别每次都跳回桌面
+  const r = await api("/api/pipe/dialog", {path: cur0.length ? cur0[cur0.length - 1] : ""});
   if(r.state === "ok"){
     const cur = $("#ds-folders").value.split("\n").map(s=>s.trim()).filter(Boolean);
     if(!cur.includes(r.path)) cur.push(r.path);
@@ -2152,6 +2242,7 @@ function outSortVal(it, k){
     case "size":  return Number(it.size) || 0;
     case "kbps":  return Number(it.kbps) || 0;
     case "clips": return Number(it.clips) || 0;
+    case "qc":    return it.qc ? (Number(it.qc.score) || 0) : -1;      // 没体检过的排最后
     case "mtime": return Number(it.mtime) || 0;
   }
   return 0;
@@ -2181,6 +2272,111 @@ function fmtWhen(ts){
   if(!ts) return "";
   const d = new Date(ts*1000), p = v=>String(v).padStart(2,"0");
   return (d.getMonth()+1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes());
+}
+
+/* ---------- 成片体检（黑边 / 字幕 / 静音 / 音量 / 首尾黑场 / 码率） ---------- */
+const QCLV = {ok:"通过", warn:"有建议", bad:"有问题", info:"—"};
+function qcBadge(it){
+  if(!it.qc) return mk("span","qcb","未检");
+  const lv = it.qc.level || "warn";
+  const b = mk("span","qcb " + lv, (it.qc.score|0) + "分");
+  b.title = "体检 " + (it.qc.score|0) + " 分 · " + (QCLV[lv] || lv) +
+            (it.qc.bad ? "　" + it.qc.bad + " 项要修" : "") +
+            (it.qc.warn ? "　" + it.qc.warn + " 条建议" : "");
+  b.onclick = (e)=>{ e.stopPropagation(); pickOut(it.name); };
+  return b;
+}
+function paintQc(q){
+  const box = $("#qc-box");
+  box.hidden = false;
+  box.innerHTML = "";
+  const wrap = mk("div","health");
+  const hh = mk("div","hh");
+  hh.appendChild(mk("b", null, "体检 " + (q.score|0) + " 分"));
+  hh.appendChild(mk("span", "qcb " + (q.level || "warn"), QCLV[q.level] || q.level || ""));
+  const bad = q.bad || 0, warn = q.warn || 0;
+  hh.appendChild(mk("span", null, "· " + (q.items||[]).length + " 项检查" +
+      (bad ? "， " + bad + " 项要修" : "") + (warn ? "， " + warn + " 条建议" : "")));
+  const sp = mk("span"); sp.style.flex = "1"; hh.appendChild(sp);
+  hh.appendChild(mk("span", null, q.ts || ""));
+  const bRe = mk("button","g sm","重新体检");
+  bRe.onclick = ()=> showQc(q.name, "force");
+  hh.appendChild(bRe);
+  wrap.appendChild(hh);
+
+  const ul = mk("ul","hadv");
+  const ord = {bad:0, warn:1, ok:2, info:3};
+  (q.items || []).slice().sort((a,b)=> (ord[a.level] ?? 9) - (ord[b.level] ?? 9)).forEach(it=>{
+    ul.appendChild(mk("li", it.level, it.label + "：" + it.msg + (it.hint ? "　— " + it.hint : "")));
+  });
+  wrap.appendChild(ul);
+
+  const m = q.metrics || {};
+  const meta = mk("div","qc-meta");
+  const bits = [];
+  if(m.dur) bits.push("时长 " + fmtDur(m.dur));
+  if(m.w) bits.push(m.w + "×" + m.h);
+  if(m.fps) bits.push(m.fps + "fps");
+  if(m.kbps) bits.push("码率 " + m.kbps + "kbps");
+  if(m.sub) bits.push("字幕 " + m.sub + " 句");
+  if(m.lufs != null) bits.push("响度 " + Number(m.lufs).toFixed(1) + " LUFS");
+  if(m.tp != null) bits.push("峰值 " + Number(m.tp).toFixed(1) + " dBTP");
+  if(m.bar) bits.push("黑边 " + m.bar + "%");
+  bits.forEach(t=> meta.appendChild(mk("span", null, t)));
+  wrap.appendChild(meta);
+  box.appendChild(wrap);
+}
+/* mode: "auto"=只读缓存（没体检过就提示），"force"=现跑一遍 */
+async function showQc(name, mode){
+  const box = $("#qc-box");
+  const it = (S.outs || []).find(x=>x.name === name);
+  if(mode !== "force" && !(it && it.qc)){
+    box.hidden = false;
+    box.innerHTML = "";
+    const h = mk("div","hintline");
+    h.textContent = "这条还没体检。点上面「体检这条」跑一遍：黑边、字幕超宽、静音断档、音量、首尾黑场、码率，几秒钟。";
+    box.appendChild(h);
+    return;
+  }
+  if(mode === "force"){
+    box.hidden = false;
+    box.innerHTML = "";
+    box.appendChild(mk("div","hintline","体检中…（要解一遍画面和音轨）"));
+  }
+  const r = await api("/api/pipe/qc?name=" + encodeURIComponent(name) + (mode === "force" ? "&force=1" : ""));
+  if(r.error || !r.qc || r.qc.ok === false){
+    box.hidden = false;
+    box.innerHTML = "";
+    box.appendChild(mk("div","hintline", r.error || (r.qc && r.qc.error) || "没拿到体检结果"));
+    return;
+  }
+  if(it && r.qc.ok !== false){
+    it.qc = {score:r.qc.score, level:r.qc.level, warn:r.qc.warn, bad:r.qc.bad};
+    renderOutList(name);
+  }  paintQc(r.qc);
+}
+async function runQc(names){
+  names = (names || []).filter(Boolean);
+  if(!names.length){ toast("先在列表里选要体检的成片"); return; }
+  const btn = $("#btn-ol-qc"), btn2 = $("#btn-ol-qcall");
+  btn.disabled = btn2.disabled = true;
+  $("#ol-msg").textContent = "体检 " + names.length + " 条…";
+  const r = await api("/api/pipe/qc", {names, force:true});
+  if(r.error){
+    btn.disabled = btn2.disabled = false;
+    $("#ol-msg").textContent = "";
+    toast(isDown(r.error) ? DOWN_TIP : ("体检失败：" + r.error), 6000);
+    return;
+  }
+  const j = await pollJob(r.job);
+  btn.disabled = btn2.disabled = false;
+  $("#ol-msg").textContent = "";
+  if(j.state === "error"){ toast("体检失败：" + (j.error || ""), 6000); }
+  else { toast(j.message || "体检完成", 4500); }
+  await renderOut();
+  if(names[0] && (S.outs || []).some(x=>x.name === names[0])){
+    pickOut(names[0]);
+  }
 }
 
 async function renderOut(){
@@ -2217,16 +2413,16 @@ async function renderOut(){
   const dl = "/api/pipe/out?name=" + encodeURIComponent(cur.name);
   $("#btn-dl").href = dl;
   $("#btn-dl").setAttribute("download", cur.name);
-  $("#btn-outdir").onclick = ()=> api("/api/openfolder", {path:cur.out.replace(/[\\/][^\\/]+$/, "")}).then(r=>{
-    if(r.error) toast(r.error, 4000);
-  });
+  $("#btn-outdir").onclick = ()=> openFolder(cur.out.replace(/[\\/][^\\/]+$/, ""));
   $("#btn-csv").onclick = ()=>{
     if(!cur.shots_csv){ toast("这一条没有分镜表记录（是之前渲染的）"); return; }
-    api("/api/openfolder", {path:cur.shots_csv}).then(r=>{ if(r.error) toast(r.error, 4000); });
+    openFolder(cur.shots_csv);
   };
   $("#btn-outdel").onclick = async ()=>{
     if(await delOne(cur.name, !!cur.shots_csv, true)) renderOut();
   };
+  $("#btn-qc").onclick = ()=> showQc(cur.name, "force");
+  showQc(cur.name, "auto");
   renderOutList(cur.name);
 }
 
@@ -2302,6 +2498,8 @@ function renderOutList(curName){
     tr.appendChild(kb);
     tr.appendChild(mk("td", null, it.clips || "—"));
 
+    const tdQ = mk("td"); tdQ.appendChild(qcBadge(it)); tr.appendChild(tdQ);
+
     const when = p.when || (it.mtime ? fmtWhen(it.mtime) : "");
     tr.appendChild(mk("td","tc", when));
 
@@ -2331,6 +2529,7 @@ function updateOlCnt(){
   $("#ol-cnt").textContent = "已选 " + n + " / " + all + " 条";
   $("#btn-ol-dl").disabled = n === 0;
   $("#btn-ol-del").disabled = n === 0;
+  if($("#btn-ol-qc")) $("#btn-ol-qc").disabled = n === 0;
   // 勾选后底部浮出批量操作条，列表滚多远都能点到
   const sz = S.outs.reduce((a,b)=> a + (S.outSel.has(b.name) ? (b.size || 0) : 0), 0);
   $("#olfab-n").textContent = "已选 " + n + " 条";
@@ -2409,11 +2608,18 @@ $("#btn-ol-none").onclick = ()=>{
 $("#btn-ol-dir").onclick = ()=>{
   const base = (S.outs[0] && S.outs[0].out) || "";
   if(!base){ toast("还没有成片"); return; }
-  api("/api/openfolder", {path: base.replace(/[\\/][^\\/]+$/, "")}).then(r=>{ if(r.error) toast(r.error, 4000); });
+  openFolder(base.replace(/[\\/][^\\/]+$/, ""));
 };
 
 $("#btn-ol-dl").onclick = ()=> zipSel($("#btn-ol-dl"), $("#ol-msg"), $("#ol-bar"));
 $("#btn-ol-del").onclick = ()=> delSel($("#btn-ol-del"), $("#ol-msg"), $("#ol-bar"));
+$("#btn-ol-qc").onclick = ()=> runQc([...S.outSel]);
+$("#btn-ol-qcall").onclick = ()=>{
+  const names = (S.outs || []).map(x=>x.name);
+  if(!names.length){ toast("还没有成片"); return; }
+  if(names.length > 6 && !confirm("要体检 " + names.length + " 条成片？\n每条都要解一遍画面和音轨，大概每条 2~5 秒。")) return;
+  runQc(names);
+};
 
 /* 底部浮动操作条 */
 $("#olfab-dl").onclick = ()=> zipSel($("#olfab-dl"), null, $("#ol-bar"));
@@ -2435,8 +2641,10 @@ async function boot(){
   loadDesubFiles();
   $("#ds-folders").value = localStorage.getItem("pipe_ds_folders") || "";
   $("#ds-folders").addEventListener("input", ()=> localStorage.setItem("pipe_ds_folders", $("#ds-folders").value));
+  setupFolderDrop($("#ds-folders"), null, "pipe_ds_folders");
   $("#folder").value = localStorage.getItem("pipe_folders") || "";
   refreshFolCnt();
+  setupFolderDrop($("#folder"), $("#scan-msg"), "pipe_folders");
   await loadCfg();
   const qs = new URLSearchParams(location.search);
   if(qs.get("pid")) localStorage.setItem("pipe_pid", qs.get("pid"));

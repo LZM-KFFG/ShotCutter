@@ -187,6 +187,7 @@
     <div class="chips">
       <span class="chip"><i class="dot" id="dot"></i><span id="chip-engine">引擎检测中</span></span>
       <span class="chip" id="chip-ff">ffmpeg</span>
+      <a class="chip" href="/one" style="text-decoration:none;cursor:pointer">⚡ 一键出片</a>
       <a class="chip" href="/pipeline" style="text-decoration:none;cursor:pointer">成片流水线 →</a>
     </div>
   </div>
@@ -1299,7 +1300,10 @@ document.addEventListener("keydown", e=>{
     const h = await fetch("/api/health").then(x=>x.json());
     DET = h.detectors;
     $("#chip-engine").textContent = "PySceneDetect " + h.scenedetect;
-    $("#chip-ff").textContent = "ffmpeg " + h.ffmpeg;
+    // h.ffmpeg 是可执行文件名（如 ffmpeg.exe），别再拼一遍「ffmpeg」
+    const ffOk = h.ffmpeg && h.ffmpeg !== "未找到";
+    $("#chip-ff").textContent = ffOk ? "ffmpeg 已就绪" : "ffmpeg 未找到";
+    $("#chip-ff").title = ffOk ? ("使用：" + h.ffmpeg) : "没找到 ffmpeg，切割和流水线都用不了";
     $("#dot").classList.toggle("off", !h.ok);
     const d = DET[state.params.detector];
     state.params.threshold = d.default;

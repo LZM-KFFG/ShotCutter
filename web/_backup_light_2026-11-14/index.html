@@ -1,0 +1,1322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>镜头切割器</title>
+<style>
+  :root{
+    --bg:#f5f5f2; --panel:#ffffff; --line:#e4e3de; --line-2:#d6d5cf;
+    --ink:#1b1b19; --muted:#6d6c66; --faint:#93918a;
+    --accent:#2f5bd7; --accent-soft:#eef2fd; --accent-line:#b9c8f4;
+    --ok:#1f7a4d; --warn:#a15c07; --err:#b42318;
+    --mono:ui-monospace,"Cascadia Mono",Consolas,"SF Mono",monospace;
+    --sans:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+  }
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  html,body{margin:0;height:100%}
+  body{background:var(--bg);color:var(--ink);font:14px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
+  button{font-family:inherit;font-size:13px;cursor:pointer;user-select:none;-webkit-user-select:none;-webkit-user-drag:none}
+  button:disabled{opacity:.55;cursor:default}
+  header{position:sticky;top:0;z-index:20;background:rgba(245,245,242,.92);backdrop-filter:blur(8px);border-bottom:1px solid var(--line)}
+  .hwrap{max-width:1400px;margin:0 auto;padding:14px 24px;display:flex;align-items:center;gap:14px}
+  .brand{display:flex;flex-direction:column;gap:1px}
+  .brand h1{margin:0;font-size:16px;font-weight:500;letter-spacing:.2px}
+  .brand p{margin:0;font-size:12px;color:var(--muted)}
+  .chips{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);
+    background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:3px 10px}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+  .dot.off{background:var(--err)}
+  main{max-width:1400px;margin:0 auto;padding:20px 24px 120px;display:grid;grid-template-columns:308px 1fr;gap:20px;align-items:start}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;position:sticky;top:76px}
+  .psec{padding:16px 16px 14px;border-bottom:1px solid var(--line)}
+  .psec:last-child{border-bottom:0}
+  .plabel{font-size:11px;letter-spacing:.8px;text-transform:uppercase;color:var(--faint);margin-bottom:10px;font-weight:500}
+  .dets{display:grid;gap:6px}
+  .det{text-align:left;background:#fbfbf9;border:1px solid var(--line);border-radius:8px;padding:8px 10px;transition:.12s}
+  .det b{display:block;font-weight:500;font-size:13px;color:var(--ink)}
+  .det span{font-size:11px;color:var(--faint)}
+  .det:hover{border-color:var(--line-2);background:#fff}
+  .det.on{background:var(--accent-soft);border-color:var(--accent-line)}
+  .det.on b{color:var(--accent)}
+  .hint{margin-top:10px;font-size:11.5px;color:var(--muted);line-height:1.5;min-height:34px}
+  .row{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px}
+  .row label{font-size:12.5px;color:var(--muted)}
+  .val{font-family:var(--mono);font-size:13px;color:var(--ink);font-weight:500}
+  input[type=range]{-webkit-appearance:none;width:100%;height:22px;background:transparent;margin:0 0 2px}
+  input[type=range]::-webkit-slider-runnable-track{height:4px;background:var(--line-2);border-radius:2px}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
+    background:#fff;border:2px solid var(--accent);margin-top:-5px;box-shadow:0 0 0 3px rgba(47,91,215,.10)}
+  .scale{display:flex;justify-content:space-between;font-size:10.5px;color:var(--faint);font-family:var(--mono)}
+  .seg{display:flex;background:#f2f2ee;border:1px solid var(--line);border-radius:8px;padding:2px}
+  .seg button{flex:1;border:0;background:transparent;padding:6px 4px;border-radius:6px;color:var(--muted);font-size:12px}
+  .seg button.on{background:#fff;color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.06)}
+  .tiny{font-size:11px;color:var(--faint);margin-top:6px;line-height:1.45}
+  .tinput{width:100%;font:12px var(--mono);padding:7px 9px;border:1px solid var(--line);border-radius:8px;background:#fbfbf9;color:var(--ink)}
+  .tinput:focus{outline:none;border-color:var(--accent-line);background:#fff}
+  .ghost{border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:7px;padding:5px 9px;font-size:12px}
+  .ghost:hover{border-color:var(--line-2);color:var(--ink)}
+  .drop{margin-bottom:16px;border:1.5px dashed var(--line-2);border-radius:14px;background:#fbfbf9;
+    padding:30px 20px;text-align:center;transition:.15s;cursor:pointer}
+  .drop:hover,.drop.hot{border-color:var(--accent);background:var(--accent-soft)}
+  .drop h3{margin:0 0 5px;font-size:14px;font-weight:500}
+  .drop p{margin:0;font-size:12px;color:var(--muted)}
+  .drop .or{margin-top:12px;display:flex;gap:8px;justify-content:center}
+  .drop .or2{margin-top:9px;display:flex;gap:6px;justify-content:center;align-items:center;max-width:560px;margin-left:auto;margin-right:auto;cursor:default}
+  .drop .or2 input{flex:1;min-width:0;font:11.5px var(--mono);padding:6px 9px;border:1px solid var(--line);border-radius:7px;background:#fff;color:var(--ink);cursor:text}
+  .drop .or2 input:focus{outline:none;border-color:var(--accent-line)}
+  .drop .or2 .ghost{flex:none;padding:5px 10px;font-size:11.5px}
+  .vcard{background:var(--panel);border:1px solid var(--line);border-radius:12px;margin-bottom:14px;overflow:hidden}
+  .vhead{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--line)}
+  .vhead .nm{font-size:13.5px;font-weight:500;max-width:42%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .vhead .meta{font-size:11.5px;color:var(--muted);font-family:var(--mono)}
+  .vhead .acts{margin-left:auto;display:flex;gap:6px;align-items:center}
+  .badge{font-size:11px;padding:2px 7px;border-radius:6px;background:#f2f2ee;color:var(--muted);border:1px solid var(--line)}
+  .badge.ok{background:#eef7f1;border-color:#cfe6d9;color:var(--ok)}
+  .badge.err{background:#fdf0ef;border-color:#f3d2cf;color:var(--err)}
+  .badge.run{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent)}
+  .vbody{padding:12px 14px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:8px}
+  .cuts{border:1px solid var(--line);border-radius:10px;background:#fbfbf9;padding:10px 12px;margin-bottom:12px}
+  .cuts-head{font-size:11.5px;color:var(--faint);margin-bottom:9px;line-height:1.5}
+  .cutrows{display:grid;grid-template-columns:repeat(auto-fill,minmax(212px,1fr));gap:6px;max-height:190px;overflow:auto}
+  .cutrow{display:flex;gap:5px;align-items:center}
+  .cutrow.add{margin-top:9px;padding-top:9px;border-top:1px dashed var(--line)}
+  .cutno{font-family:var(--mono);font-size:11px;color:var(--faint);width:16px;flex:none}
+  .cutinput{padding:4px 7px;font-size:11.5px;flex:1;min-width:0}
+  .cutrow .ghost{padding:4px 7px;font-size:11.5px;flex:none}
+  .cuts-foot{display:flex;gap:8px;align-items:center;margin-top:10px}
+  .btn-apply{background:var(--accent);color:#fff;border:0;border-radius:7px;padding:6px 14px;font-size:12.5px}
+  .ghost.on{border-color:var(--accent-line);color:var(--accent);background:var(--accent-soft)}
+  .shot{position:relative;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#f2f2ee;
+    cursor:pointer;display:block;transition:.12s}
+  .shot img{display:block;width:100%;aspect-ratio:16/9;object-fit:cover;background:#dcdbd5}
+  .shot .cap{display:flex;justify-content:space-between;gap:4px;padding:5px 7px;font-family:var(--mono);font-size:11px;color:var(--muted);background:#fff}
+  .shot .no{position:absolute;top:5px;left:5px;font-family:var(--mono);font-size:10px;color:#fff;
+    background:rgba(0,0,0,.58);padding:1px 5px;border-radius:4px}
+  .shot input{position:absolute;top:5px;right:5px;margin:0;accent-color:var(--accent);width:14px;height:14px}
+  .shot.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+  .shot.nosel{opacity:.45;filter:grayscale(1)}
+  .shot .play{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    background:rgba(0,0,0,.16);opacity:0;transition:.12s;pointer-events:none}
+  .shot:hover .play{opacity:1}
+  .shot .play i{width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;
+    display:flex;align-items:center;justify-content:center;font-size:10px;font-style:normal;padding-left:2px}
+  /* 时间轴预览 */
+  .preview{border:1px solid #2a2a24;border-radius:10px;background:#15150f;margin-bottom:12px;overflow:hidden}
+  .pv-stage{position:relative;display:flex;justify-content:center;background:#000;min-height:120px}
+  .pv-stage video{width:100%;max-height:330px;display:block;background:#000}
+  .pv-fail{flex:1;max-width:560px;color:#d8d6cc;font-size:12.5px;text-align:center;padding:30px 20px;line-height:1.75}
+  .pv-fail b{color:#fff;font-weight:500}
+  .pv-fail .ghost{margin-top:10px;background:#242420;border-color:#3a3a32;color:#e8e6de}
+  .pv-fail .ghost:hover{border-color:#5a5a4e;color:#fff}
+  .tl{position:relative;height:34px;margin:10px 12px 0;cursor:pointer;touch-action:none;user-select:none}
+  .tl-track{position:absolute;inset:0;background:#0e0e0a;border:1px solid #2a2a24;border-radius:4px;overflow:hidden}
+  .tseg{position:absolute;top:0;bottom:0;overflow:hidden;background-size:cover;background-position:center;
+    border-right:1px solid rgba(0,0,0,.55)}
+  .tseg.off{filter:grayscale(1) brightness(.55)}
+  .tseg::after{content:"";position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--accent);opacity:0}
+  .tseg.on::after{opacity:1}
+  .tcut{position:absolute;top:0;bottom:0;width:1px;background:rgba(255,255,255,.55);pointer-events:none}
+  .thead{position:absolute;top:-3px;bottom:-3px;width:2px;background:#fff;pointer-events:none;
+    box-shadow:0 0 0 1px rgba(0,0,0,.55)}
+  .thead::before{content:"";position:absolute;top:-4px;left:-3px;width:8px;height:8px;border-radius:50%;background:#fff}
+  .pv-ctl{display:flex;align-items:center;gap:8px;padding:10px 12px 11px;flex-wrap:wrap}
+  .pv-btn{background:#242420;border:1px solid #3a3a32;color:#ece9e0;border-radius:7px;padding:5px 10px;font-size:12px}
+  .pv-btn:hover{border-color:#5a5a4e;background:#2c2c26}
+  .pv-btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+  .pv-btn.on{background:#1e2a4a;border-color:#4a6bd0;color:#b9c8f4}
+  .tl.onlysel .tseg.off{filter:grayscale(1) brightness(.3)}
+  .tl.onlysel .tseg.off::before{content:"";position:absolute;inset:0;
+    background:repeating-linear-gradient(45deg,rgba(0,0,0,.55) 0 4px,rgba(255,255,255,.06) 4px 8px)}
+  .pv-time em{font-style:normal;color:#8d8b82;margin-left:10px;font-size:11.5px}
+  .pv-time{font-family:var(--mono);font-size:12px;color:#cfcdc4;margin-left:auto}
+  .pv-time b{color:#fff;font-weight:500}
+  .pv-key{font-size:11px;color:#87857c;padding:0 12px 10px;line-height:1.5}
+  .pv-key kbd{font-family:var(--mono);font-size:10px;border:1px solid #3a3a32;border-radius:3px;
+    padding:0 4px;color:#cfcdc4;background:#1e1e18}
+  .prog{height:4px;background:#ecebe6;border-radius:2px;overflow:hidden;margin:10px 0 2px}
+  .prog i{display:block;height:100%;background:var(--accent);width:0;transition:width .25s}
+  .empty{color:var(--faint);font-size:12.5px;padding:26px;text-align:center;border:1px dashed var(--line);border-radius:12px;background:#fbfbf9}
+  footer{position:fixed;bottom:0;left:0;right:0;z-index:30;background:rgba(255,255,255,.94);
+    backdrop-filter:blur(10px);border-top:1px solid var(--line)}
+  .fwrap{max-width:1400px;margin:0 auto;padding:10px 24px;display:flex;align-items:center;gap:14px}
+  .fstat{font-size:12.5px;color:var(--muted)}
+  .fstat b{color:var(--ink);font-weight:500}
+  .fbar{flex:1;height:4px;background:#ecebe6;border-radius:2px;overflow:hidden;max-width:280px;opacity:0;transition:opacity .2s}
+  .fbar.on{opacity:1}
+  .fbar i{display:block;height:100%;width:0;background:var(--accent);transition:width .25s}
+  .primary{margin-left:auto;background:var(--accent);color:#fff;border:0;border-radius:8px;padding:9px 18px;font-size:13px;font-weight:500}
+  .primary:disabled{opacity:.45;cursor:not-allowed}
+  .link{background:none;border:0;color:var(--accent);font-size:12.5px;padding:0}
+  .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:78px;z-index:60;background:#1b1b19;color:#fff;
+    padding:9px 16px;border-radius:8px;font-size:12.5px;opacity:0;pointer-events:none;transition:.2s}
+  .toast.on{opacity:1}
+  .result{margin:0 0 14px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .result h4{margin:0 0 8px;font-size:13px;font-weight:500}
+  .result ul{margin:0;padding-left:16px;font-size:12px;color:var(--muted);max-height:140px;overflow:auto}
+  .result li{font-family:var(--mono);font-size:11px;word-break:break-all}
+  .chkline{display:flex;gap:8px;align-items:flex-start;margin-top:11px;padding-top:11px;
+    border-top:1px dashed var(--line);cursor:pointer}
+  .chkline input{margin:2px 0 0;accent-color:var(--accent);width:14px;height:14px;flex:none}
+  .chkline span{font-size:12.5px;color:var(--ink)}
+  .chkline em{display:block;font-style:normal;font-size:11px;color:var(--faint);margin-top:1px}
+  .seg.sml{margin-top:8px}
+  .seg.sml button{font-size:11.5px;padding:4px 2px}
+  .dd{margin-top:12px;padding-top:11px;border-top:1px dashed var(--line);font-size:12px;color:var(--muted)}
+  .dd-h{color:var(--ink)}
+  .dd-h b{font-weight:500}
+  .dd details{margin-top:6px}
+  .dd summary{cursor:pointer;font-size:11.5px;color:var(--accent);outline:none}
+  .dd ul{max-height:150px;overflow:auto;margin:6px 0 0;padding-left:16px}
+  .dd li{font-family:var(--mono);font-size:11px;word-break:break-all}
+  .dd li i{font-style:normal;color:var(--faint)}
+  .dd .warn{color:var(--warn);margin-top:6px}
+  @media (max-width:980px){main{grid-template-columns:1fr}.panel{position:static}}
+</style>
+</head>
+<body>
+<header>
+  <div class="hwrap">
+    <div class="brand">
+      <h1>镜头切割器</h1>
+      <p>PySceneDetect 检测 · ffmpeg 无损切割 · 全部在本机运行</p>
+    </div>
+    <div class="chips">
+      <span class="chip"><i class="dot" id="dot"></i><span id="chip-engine">引擎检测中</span></span>
+      <span class="chip" id="chip-ff">ffmpeg</span>
+      <a class="chip" href="/one" style="text-decoration:none;cursor:pointer">⚡ 一键出片</a>
+      <a class="chip" href="/pipeline" style="text-decoration:none;cursor:pointer">成片流水线 →</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <aside class="panel">
+    <div class="psec">
+      <div class="plabel">检测器</div>
+      <div class="dets" id="dets"></div>
+      <div class="hint" id="det-hint"></div>
+    </div>
+
+    <div class="psec">
+      <div class="row"><label for="thr">阈值</label><span class="val" id="thr-v">3.0</span></div>
+      <input type="range" id="thr">
+      <div class="scale"><span id="thr-min">1</span><span id="thr-max">8</span></div>
+      <div class="tiny">调低＝切得更细（易误切）　调高＝只留大变化（易漏切）</div>
+    </div>
+
+    <div class="psec">
+      <div class="row"><label for="ml">最短镜头</label><span class="val" id="ml-v">0.6s</span></div>
+      <input type="range" id="ml" min="0.2" max="5" step="0.1" value="0.6">
+      <div class="tiny">短于此时长的切点会与相邻镜头合并，避免切出碎渣。</div>
+    </div>
+
+    <div class="psec">
+      <div class="plabel">导出方式</div>
+      <div class="seg" id="mode">
+        <button data-m="copy" class="on">无损流拷贝</button>
+        <button data-m="recode">逐帧精确</button>
+      </div>
+      <div class="tiny" id="mode-hint">不重新编码，几秒完成、画质零损失；切点对齐关键帧，起点可能偏移 0.5~2 秒。</div>
+      <label class="chkline" for="dedup">
+        <input type="checkbox" id="dedup">
+        <span>去重后导出<em>重复的镜头只导一条，省一次人工挑</em></span>
+      </label>
+      <div class="seg sml" id="dedup-level" hidden>
+        <button data-l="conservative">保守</button>
+        <button data-l="normal" class="on">标准</button>
+        <button data-l="aggressive">激进</button>
+      </div>
+      <div class="tiny" id="dedup-hint" hidden>保守＝只删几乎一模一样的；标准＝连重拍近似也合并；激进＝同场景不同构图也算重复。</div>
+    </div>
+
+    <div class="psec">
+      <div class="plabel">输出目录</div>
+      <input class="tinput" id="outdir" placeholder="默认：源文件夹 / 镜头切片 / 片名">
+      <div class="tiny">留空即按默认规则输出，每个视频一个子文件夹。</div>
+    </div>
+
+    <div class="psec">
+      <div class="plabel">高级</div>
+      <label class="tiny" style="display:flex;gap:7px;align-items:center;color:var(--muted);margin:0">
+        <input type="checkbox" id="skip"> 快速模式（隔帧检测，速度≈2×，精度略降）
+      </label>
+    </div>
+  </aside>
+
+  <section>
+    <div class="drop" id="drop">
+      <h3>把视频拖进来</h3>
+      <p>支持 mp4 / mov / mkv / avi / webm / ts 等，可一次拖多个</p>
+      <div class="or">
+        <button class="ghost" id="btn-browse">选择文件</button>
+        <button class="ghost" id="btn-pick">直接引用磁盘文件（不复制）</button>
+      </div>
+      <div class="or2">
+        <input id="pathinput" spellcheck="false" placeholder="或直接粘贴路径：D:\素材\a.mp4（多个用分号隔开，点这里不算拖入）">
+        <button class="ghost" id="btn-addpath">添加</button>
+      </div>
+    </div>
+    <div id="results"></div>
+    <div id="list"></div>
+    <div class="empty" id="empty">还没有视频。拖入后会立即按左侧参数开始检测。</div>
+  </section>
+</main>
+
+<footer>
+  <div class="fwrap">
+    <span class="fstat" id="fstat">就绪</span>
+    <div class="fbar"><i id="fbar"></i></div>
+    <button class="link" id="btn-open" style="display:none">打开输出文件夹</button>
+    <button class="primary" id="btn-export" disabled>导出选中片段</button>
+  </div>
+</footer>
+<div class="toast" id="toast"></div>
+<input type="file" id="file" multiple accept="video/*" style="display:none">
+
+<script>
+const $ = s => document.querySelector(s);
+const fmtSize = n => n > 1<<30 ? (n/(1<<30)).toFixed(2)+" GB" : n > 1<<20 ? (n/(1<<20)).toFixed(0)+" MB" : (n/1024).toFixed(0)+" KB";
+const fmtDur = s => s>=3600 ? `${Math.floor(s/3600)}:${String(Math.floor(s%3600/60)).padStart(2,"0")}:${String(Math.round(s%60)).padStart(2,"0")}`
+                            : `${Math.floor(s/60)}:${String(Math.round(s%60)).padStart(2,"0")}`;
+const tcShort = (tc, dur) => (dur >= 3600 ? tc : tc.replace(/^00:/, ""));
+const statText = v => {
+  const n = v.sel.filter(Boolean).length;
+  const d = v.sel.reduce((a,on,i)=>a+(on?v.scenes[i].dur:0),0);
+  return `共 <b>${v.scenes.length}</b> 个镜头，已选 <b>${n}</b> 段 · 选中总时长 ${fmtDur(d)}`;
+};
+
+let DET = {};
+let state = {
+  params: { detector:"adaptive", threshold:3.0, min_len:0.6, frame_skip:0 },
+  mode: "copy",
+  dedup: false,            // 导出时去重
+  dedupLevel: "normal",
+  outdir: "",
+  videos: [],
+  job: null,
+  preview: null,          // { token, t, playing, proxy }
+  lastOut: "",
+};
+const fmtT = s =>{
+  s = Math.max(0, Number(s)||0);
+  const m = Math.floor(s/60), sec = Math.floor(s%60), ms = Math.floor((s%1)*1000);
+  return `${String(m).padStart(2,"0")}:${String(sec).padStart(2,"0")}.${String(ms).padStart(3,"0")}`;
+};
+
+function toast(msg, ms=2200){
+  const t = $("#toast"); t.textContent = msg; t.classList.add("on");
+  clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove("on"), ms);
+}
+
+/* 复制文本到剪贴板（file:// 或 http 下都可用的降级链） */
+async function copyText(txt){
+  try{
+    await navigator.clipboard.writeText(txt);
+    return true;
+  }catch(e){
+    try{
+      const ta = document.createElement("textarea");
+      ta.value = txt; ta.style.position="fixed"; ta.style.opacity="0";
+      document.body.appendChild(ta); ta.select();
+      const ok = document.execCommand("copy");
+      ta.remove();
+      return ok;
+    }catch(e2){ return false; }
+  }
+}
+
+/* 统一的「在资源管理器中打开」——失败时说清原因，别静默 */
+let openBusy = false;
+async function openFolder(path){
+  if(openBusy){ toast("正在打开，请稍候…", 1200); return; }
+  openBusy = true;
+  try{
+    const r = await fetch("/api/openfolder", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({path: path || state.lastOut || ""})
+    }).then(x=>x.json()).catch(e=>({error:"请求失败：" + e.message}));
+    if(r.ok){
+      toast("已在资源管理器中打开：" + (r.path || path || ""), 2600);
+    }else{
+      const target = path || state.lastOut || "";
+      const copied = target ? await copyText(target) : false;
+      toast((r.error || "打开失败") + (copied ? "　路径已复制，可粘到资源管理器地址栏" : ""), 5000);
+    }
+  } finally {
+    openBusy = false;
+  }
+}
+
+/* ---------------- 参数面板 ---------------- */
+function renderDets(){
+  const box = $("#dets"); box.innerHTML = "";
+  Object.entries(DET).forEach(([key, d])=>{
+    const b = document.createElement("button");
+    b.className = "det" + (state.params.detector===key ? " on" : "");
+    b.innerHTML = `<b>${d.label}</b><span>默认 ${d.default}</span>`;
+    b.onclick = ()=>{
+      state.params.detector = key;
+      const nd = DET[key];
+      state.params.threshold = nd.default;
+      const r = $("#thr");
+      r.min = nd.min; r.max = nd.max; r.step = nd.step; r.value = nd.default;
+      $("#thr-v").textContent = fmtThr(nd.default, key);
+      $("#thr-min").textContent = nd.min; $("#thr-max").textContent = nd.max;
+      $("#det-hint").textContent = nd.hint;
+      renderDets();
+      toast("参数已更改，点视频卡片上的「重新检测」生效");
+    };
+    box.appendChild(b);
+    if(state.params.detector===key){
+      $("#det-hint").textContent = d.hint;
+      const r = $("#thr");
+      r.min=d.min; r.max=d.max; r.step=d.step;
+      $("#thr-min").textContent=d.min; $("#thr-max").textContent=d.max;
+    }
+  });
+}
+const fmtThr = (v, k) => (k==="content"||k==="threshold") ? Number(v).toFixed(k==="threshold"?0:1) : Number(v).toFixed(2);
+
+$("#thr").oninput = e =>{
+  state.params.threshold = parseFloat(e.target.value);
+  $("#thr-v").textContent = fmtThr(state.params.threshold, state.params.detector);
+};
+$("#ml").oninput = e =>{
+  state.params.min_len = parseFloat(e.target.value);
+  $("#ml-v").textContent = state.params.min_len.toFixed(1)+"s";
+};
+$("#skip").onchange = e => state.params.frame_skip = e.target.checked ? 1 : 0;
+$("#mode").onclick = e =>{
+  const b = e.target.closest("button"); if(!b) return;
+  [...$("#mode").children].forEach(x=>x.classList.toggle("on", x===b));
+  state.mode = b.dataset.m;
+  $("#mode-hint").textContent = state.mode==="copy"
+    ? "不重新编码，几秒完成、画质零损失；切点对齐关键帧，起点可能偏移 0.5~2 秒。"
+    : "逐帧精确到检测时间点，H.264 CRF18 重编码，速度慢数倍，体积略增。";
+};
+$("#outdir").oninput = e => state.outdir = e.target.value.trim();
+
+$("#dedup").onchange = e =>{
+  state.dedup = e.target.checked;
+  $("#dedup-level").hidden = !state.dedup;
+  $("#dedup-hint").hidden = !state.dedup;
+  updateFooter();
+};
+$("#dedup-level").onclick = e =>{
+  const b = e.target.closest("button"); if(!b) return;
+  [...$("#dedup-level").children].forEach(x=>x.classList.toggle("on", x===b));
+  state.dedupLevel = b.dataset.l;
+};
+
+/* ---------------- 视频列表 ---------------- */
+function findVideo(token){ return state.videos.find(v=>v.token===token); }
+
+function addCard(v){
+  if(findVideo(v.token)) return;
+  state.videos.push({
+    token:v.token, name:v.name, path:v.path, size:v.size, uploaded:v.uploaded,
+    status:"pending", err:"", progress:0, scenes:[], sel:[], fps:0, duration:0, msg:""
+  });
+  render();
+}
+
+function render(){
+  const list = $("#list"); list.innerHTML = "";
+  $("#empty").style.display = state.videos.length ? "none" : "block";
+  state.videos.forEach(v=>list.appendChild(card(v)));
+  updateFooter();
+}
+
+function mk(tag, cls, txt){
+  const n = document.createElement(tag);
+  if(cls) n.className = cls;
+  if(txt !== undefined) n.textContent = txt;
+  return n;
+}
+function mkbtn(cls, txt, fn){
+  const b = mk("button", cls, txt);
+  b.onclick = fn;
+  return b;
+}
+const parseTC = s =>{
+  if(s === undefined || s === null) return NaN;
+  const parts = String(s).trim().split(":").map(parseFloat);
+  if(!parts.length || parts.some(x=>isNaN(x))) return NaN;
+  let v = 0;
+  for(const p of parts) v = v*60 + p;
+  return v;
+};
+
+function card(v){
+  const root = mk("article", "vcard");
+  root.dataset.token = v.token;
+
+  const head = mk("div", "vhead");
+  const nm = mk("span", "nm", v.name); nm.title = v.path;
+  const meta = mk("span", "meta", `${v.duration?fmtDur(v.duration)+" · "+v.fps.toFixed(2)+"fps · ":""}${v.size?fmtSize(v.size):""}`);
+  if(v.plan && v.plan.mode !== "direct"){
+    meta.textContent += ` · ${(v.plan.v || "").toUpperCase()}${v.plan.mode === "copyv" ? "（需快速封装）" : "（需转码预览）"}`;
+    meta.title = "浏览器无法直接解码该编码，预览时会自动生成代理；导出仍用原片";
+  }
+  const bcls = v.status==="ready" ? "ok" : v.status==="error" ? "err" : v.status==="pending" ? "" : "run";
+  const btxt = v.status==="ready" ? "已检测" : v.status==="error" ? "失败"
+             : v.status==="analyzing" ? "检测中" : v.status==="pending" ? "待检测" : "处理中";
+  const badge = mk("span", "badge " + bcls, btxt);
+  const acts = mk("span", "acts");
+  if(v.status==="ready"){
+    const pvOn = state.preview && state.preview.token === v.token;
+    acts.appendChild(mkbtn("ghost" + (pvOn ? " on" : ""), pvOn ? "收起预览" : "播放预览",
+      ()=> togglePreview(v)));
+    acts.appendChild(mkbtn("ghost" + (v.editing ? " on" : ""), "切点编辑",
+      ()=>{ v.editing = !v.editing; refreshCard(v); }));
+    acts.appendChild(mkbtn("ghost", "EDL", ()=> exportEdl(v)));
+  }
+  acts.appendChild(mkbtn("ghost", "重新检测", ()=> analyze([v.token])));
+  acts.appendChild(mkbtn("ghost", "移除", ()=>{
+    if(state.preview && state.preview.token === v.token) state.preview = null;
+    state.videos = state.videos.filter(x=>x.token!==v.token); render();
+  }));
+  head.append(nm, meta, badge, acts);
+
+  const body = mk("div", "vbody");
+
+  if(v.status==="analyzing"){
+    body.innerHTML = `<div class="fstat" style="font-size:12px">${v.msg || "正在分析画面差异…"}</div>
+      <div class="prog" style="max-width:100%"><i style="width:${Math.round(v.progress*100)}%"></i></div>`;
+  } else if(v.status==="error"){
+    body.innerHTML = `<div class="fstat" style="color:var(--err);font-size:12px">${v.err}</div>`;
+  } else if(v.status==="ready"){
+    const bar = mk("div", "fstat");
+    bar.style.cssText = "font-size:12px;margin-bottom:10px;display:flex;gap:10px;align-items:center";
+    const st = mk("span", "selstat"); st.innerHTML = statText(v);
+    bar.append(st,
+      mkbtn("ghost", "全选", ()=>{ v.sel = v.sel.map(()=>true); applySelToCard(root, v); }),
+      mkbtn("ghost", "反选", ()=>{ v.sel = v.sel.map(x=>!x); applySelToCard(root, v); }));
+    bar.querySelector("button").style.marginLeft = "auto";
+    body.appendChild(bar);
+
+    if(state.preview && state.preview.token === v.token) body.appendChild(previewPanel(v));
+    if(v.editing) body.appendChild(cutsEditor(v));
+
+    const grid = mk("div", "grid");
+    v.scenes.forEach((s,i)=>{
+      const lb = mk("div", "shot " + (v.sel[i] ? "sel" : "nosel"));
+      lb.innerHTML = `<img loading="lazy" src="${s.thumb || ('/thumb?token='+v.token+'&t='+Math.round(s.start*1000))}" alt="">
+        <span class="no">${String(s.i).padStart(2,"0")}</span>
+        <input type="checkbox" ${v.sel[i]?"checked":""}>
+        <span class="play"><i>▶</i></span>
+        <div class="cap"><span>${tcShort(s.start_tc, v.duration)}</span><span>${s.dur.toFixed(2)}s</span></div>`;
+      lb.querySelector("img").onclick = ()=> seekTo(v, s.start);
+      lb.querySelector("input").onchange = e =>{
+        v.sel[i] = e.target.checked;
+        lb.classList.toggle("sel", e.target.checked);
+        lb.classList.toggle("nosel", !e.target.checked);
+        const el2 = root.querySelector(".selstat");
+        if(el2) el2.innerHTML = statText(v);
+        syncTimeline(v);
+        updateFooter();
+      };
+      grid.appendChild(lb);
+    });
+    body.appendChild(grid);
+  } else {
+    body.innerHTML = `<div class="fstat" style="font-size:12px">等待检测…</div>`;
+  }
+
+  root.append(head, body);
+  return root;
+}
+
+function cutsEditor(v){
+  const box = mk("div", "cuts");
+  box.appendChild(mk("div", "cuts-head", "改时间码可微调边界；点「删除」即与后一个镜头合并；改完点「应用重建」生效"));
+
+  const rows = mk("div", "cutrows");
+  const renumber = ()=>{
+    [...rows.querySelectorAll(".cutrow")].forEach((r,i)=>{
+      const n = r.querySelector(".cutno");
+      if(n) n.textContent = String(i+1).padStart(2,"0");
+    });
+  };
+  const addRow = value =>{
+    const ph = rows.querySelector(".tiny");
+    if(ph) ph.remove();
+    const row = mk("div", "cutrow");
+    const inp = mk("input", "tinput cutinput");
+    inp.value = value; inp.placeholder = "00:00:12.500";
+    row.append(mk("span", "cutno", ""), inp,
+      mkbtn("ghost", "删除", ()=>{ row.remove(); renumber(); }));
+    rows.appendChild(row);
+    renumber();
+  };
+  v.scenes.slice(1).forEach(sc=> addRow(sc.start_tc));
+  if(!rows.children.length) rows.appendChild(mk("div", "tiny", "整段没有内部切点，可在下方新增。"));
+  box.appendChild(rows);
+
+  const addLine = mk("div", "cutrow add");
+  const ainp = mk("input", "tinput cutinput");
+  ainp.placeholder = "新增切点，如 12.5 或 00:00:12.500";
+  addLine.append(ainp, mkbtn("ghost", "添加", ()=>{
+    if(isNaN(parseTC(ainp.value))){ toast("时间码格式不对，试试 12.5 或 00:00:12.500"); return; }
+    addRow(ainp.value.trim()); ainp.value = "";
+  }));
+  box.appendChild(addLine);
+
+  const foot = mk("div", "cuts-foot");
+  foot.append(
+    mkbtn("btn-apply", "应用重建", ()=>{
+      const vals = [...rows.querySelectorAll(".cutinput")].map(i=>parseTC(i.value)).filter(x=>!isNaN(x));
+      applyCuts(v, vals);
+    }),
+    mkbtn("ghost", "取消", ()=>{ v.editing = false; refreshCard(v); }),
+    mk("span", "tiny", `共 ${v.scenes.length} 个镜头`)
+  );
+  box.appendChild(foot);
+  return box;
+}
+
+/* ---------------- 时间轴预览 ---------------- */
+function togglePreview(v){
+  const cur = state.preview;
+  if(cur && cur.token === v.token){
+    state.preview = null;
+    refreshCard(v);
+    return;
+  }
+  const old = cur ? findVideo(cur.token) : null;
+  const keepOnly = cur ? !!cur.onlySel : false;
+  state.preview = { token: v.token, t: 0, playing: false, proxy: !!(v.needsProxy || v.proxyReady), onlySel: keepOnly };
+  if(old) refreshCard(old);
+  refreshCard(v);
+}
+
+function seekTo(v, t){
+  const cur = state.preview;
+  if(!cur || cur.token !== v.token){
+    const old = cur ? findVideo(cur.token) : null;
+    const keepOnly = cur ? !!cur.onlySel : false;
+    state.preview = { token: v.token, t, playing: false, proxy: !!v.needsProxy, onlySel: keepOnly };
+    if(old) refreshCard(old);
+    refreshCard(v);
+    return;
+  }
+  cur.t = t;
+  const root = document.querySelector(`.vcard[data-token="${v.token}"]`);
+  const video = root && root.querySelector("video");
+  if(video && video.readyState >= 1) video.currentTime = t;
+  paintActive(t);
+}
+
+function paintActive(t){
+  const pv = state.preview; if(!pv) return;
+  const tl = document.querySelector(`.vcard[data-token="${pv.token}"] .tl`);
+  if(tl && tl._paint) tl._paint(t);
+}
+
+function syncTimeline(v){
+  const tl = document.querySelector(`.vcard[data-token="${v.token}"] .tl`);
+  if(!tl) return;
+  if(tl._rebuild) tl._rebuild();
+  if(tl._paint) tl._paint(state.preview ? state.preview.t : 0);
+}
+
+/* 只更新勾选状态，不重建卡片（避免预览视频被重新加载） */
+function applySelToCard(root, v){
+  root.querySelectorAll(".grid .shot").forEach((el,i)=>{
+    const on = !!v.sel[i];
+    el.classList.toggle("sel", on);
+    el.classList.toggle("nosel", !on);
+    const cb = el.querySelector("input");
+    if(cb) cb.checked = on;
+  });
+  const st = root.querySelector(".selstat");
+  if(st) st.innerHTML = statText(v);
+  syncTimeline(v);
+  updateFooter();
+}
+
+function cutHere(v, t){
+  if(!v || !v.scenes.length) return;
+  const dur = v.duration || 0;
+  if(t <= 0.05 || t >= dur - 0.05){ toast("播放头在开头或结尾，这里切不了"); return; }
+  const near = v.scenes.map(s=>s.start).concat([0, dur])
+    .reduce((m,s)=>Math.min(m, Math.abs(s - t)), 1e9);
+  if(near < 0.06){ toast("这个位置已经有切点了"); return; }
+  if(near < 0.35){ toast(`离最近的切点只有 ${near.toFixed(2)}s，会切出碎渣；要精确微调请用「切点编辑」`); return; }
+  const cuts = v.scenes.slice(1).map(s=>s.start);
+  cuts.push(t);
+  applyCuts(v, cuts);
+  toast("已在 " + fmtT(t) + " 处切一刀");
+}
+
+/* 只播选中时的跳段判定：返回 null 表示原地继续，{jump} 跳到该秒，{stop} 表示后面没有可播段 */
+function skipPlan(scenes, sel, t){
+  const eps = 0.02;
+  const idx = scenes.findIndex(s => t >= s.start - eps && t < s.end - eps);
+  if(idx >= 0 && sel[idx]) return null;
+  for(let i=0;i<scenes.length;i++){
+    if(!sel[i]) continue;
+    if(scenes[i].end > t + eps){
+      const target = Math.max(t, scenes[i].start);
+      return Math.abs(target - t) > eps ? { jump: target } : null;
+    }
+  }
+  return { stop: true };
+}
+
+function previewPanel(v){
+  const pv = state.preview;
+  const box = mk("div", "preview");
+
+  const stage = mk("div", "pv-stage");
+  const video = document.createElement("video");
+  video.preload = "metadata";
+  video.playsInline = true;
+  const plan = v.plan || {mode:"direct", v:"", why:"", eta:""};
+  const needProxy = plan.mode !== "direct";
+  if(needProxy && (v.proxyReady || v.needsProxy)) pv.proxy = true;
+  video.src = "/media?token=" + v.token + (pv.proxy ? "&proxy=1" : "");
+  stage.appendChild(video);
+  box.appendChild(stage);
+
+  if(pv.proxy){
+    const tag = mk("div", "pv-key", "当前播放的是预览代理（原片不动，导出用的仍是原片）");
+    tag.style.padding = "6px 12px 0";
+    box.appendChild(tag);
+  }
+
+  const tl = mk("div", "tl");
+  const track = mk("div", "tl-track");
+  tl.appendChild(track);
+  const head = mk("div", "thead");
+  tl.appendChild(head);
+  box.appendChild(tl);
+
+  const dur = () => v.duration || video.duration || 1;
+
+  const buildTrack = ()=>{
+    track.innerHTML = "";
+    const d = dur();
+    v.scenes.forEach((s,i)=>{
+      const seg = mk("div", "tseg " + (v.sel[i] ? "on" : "off"));
+      seg.style.left = (s.start / d * 100) + "%";
+      seg.style.width = Math.max(0.15, (s.end - s.start) / d * 100) + "%";
+      seg.style.backgroundImage = `url(${s.thumb || ('/thumb?token='+v.token+'&t='+Math.round(s.start*1000))})`;
+      seg.title = `镜头 ${s.i} · ${s.start_tc} · ${s.dur.toFixed(2)}s`;
+      track.appendChild(seg);
+    });
+    v.scenes.slice(1).forEach(s=>{
+      const c = mk("div", "tcut");
+      c.style.left = (s.start / d * 100) + "%";
+      track.appendChild(c);
+    });
+  };
+
+  const selIdx = () => v.scenes.map((s,i)=>i).filter(i=>v.sel[i]);
+  const selDur = () => v.scenes.reduce((a,s,i)=> a + (v.sel[i] ? s.dur : 0), 0);
+  const selElapsed = t =>{
+    let acc = 0;
+    for(let i=0;i<v.scenes.length;i++){
+      const s = v.scenes[i];
+      if(!v.sel[i]) continue;
+      if(t >= s.end){ acc += s.dur; continue; }
+      if(t <= s.start) break;
+      acc += t - s.start;
+      break;
+    }
+    return acc;
+  };
+
+  const timeEl = mk("span", "pv-time");
+  const paint = t =>{
+    const d = dur();
+    t = Math.max(0, Number(t) || 0);
+    head.style.left = Math.min(100, t / d * 100) + "%";
+    let html = `<b>${fmtT(t)}</b> / ${fmtT(d)}`;
+    if(pv.onlySel) html += `<em>选中成片 ${fmtT(selElapsed(t))} / ${fmtT(selDur())}</em>`;
+    timeEl.innerHTML = html;
+    pv.t = t;
+  };
+  tl._paint = paint;
+  tl._rebuild = buildTrack;
+  buildTrack();
+  tl.classList.toggle("onlysel", !!pv.onlySel);
+
+  /* 跳过未勾选的镜头 */
+  let pendingJump = null;
+  const enforceSel = force =>{
+    if(!pv.onlySel) return "play";
+    if(video.paused && !force) return "play";
+    const plan = skipPlan(v.scenes, v.sel, video.currentTime || 0);
+    if(!plan){ pendingJump = null; return "play"; }
+    if(plan.stop){ pendingJump = null; video.pause(); return "stop"; }
+    if(pendingJump !== null && Math.abs(pendingJump - plan.jump) < 0.02) return "play";
+    pendingJump = plan.jump;
+    video.currentTime = plan.jump;
+    paint(plan.jump);
+    return "play";
+  };
+
+  const ctl = mk("div", "pv-ctl");
+  const bPlay = mkbtn("pv-btn pri", pv.playing ? "暂停" : "播放", ()=>{
+    if(video.paused){
+      if(enforceSel(true) === "stop") return;
+      video.play().catch(()=>{});
+    }
+    else video.pause();
+  });
+  const jump = dir =>{
+    const t = video.currentTime || pv.t || 0;
+    let list = v.scenes.map((s,i)=>i).filter(i=> !pv.onlySel || v.sel[i]);
+    if(!list.length) list = v.scenes.map((s,i)=>i);
+    const pos = list.findIndex(i => t >= v.scenes[i].start - 1e-3 && t < v.scenes[i].end - 1e-3);
+    let target;
+    if(dir < 0){
+      if(pos < 0){
+        const prev = list.filter(i => v.scenes[i].end <= t + 1e-3).pop();
+        target = v.scenes[prev !== undefined ? prev : list[0]].start;
+      } else if(pos === 0 || t - v.scenes[list[pos]].start > 0.6){
+        target = v.scenes[list[pos]].start;
+      } else {
+        target = v.scenes[list[pos-1]].start;
+      }
+    } else if(pos < 0){
+      const next = list.find(i => v.scenes[i].start > t + 1e-3);
+      target = next !== undefined ? v.scenes[next].start
+                                  : Math.min(dur(), v.scenes[list[list.length-1]].end);
+    } else if(pos + 1 < list.length){
+      target = v.scenes[list[pos+1]].start;
+    } else {
+      target = Math.min(dur(), v.scenes[list[pos]].end);
+    }
+    if(video.readyState >= 1) video.currentTime = target;
+    paint(target);
+  };
+  const bOnly = mkbtn("pv-btn" + (pv.onlySel ? " on" : ""), pv.onlySel ? "只播选中 ✓" : "只播选中", ()=>{
+    if(!pv.onlySel && !selIdx().length){ toast("还没勾选任何镜头，先勾几段"); return; }
+    pv.onlySel = !pv.onlySel;
+    bOnly.textContent = pv.onlySel ? "只播选中 ✓" : "只播选中";
+    bOnly.classList.toggle("on", pv.onlySel);
+    tl.classList.toggle("onlysel", pv.onlySel);
+    paint(video.currentTime || pv.t);
+    if(pv.onlySel) enforceSel();
+    toast(pv.onlySel ? `已开启：播放时跳过未勾选的镜头，只放 ${selIdx().length} 段 / ${fmtT(selDur())}`
+                     : "已关闭：按全片连续播放");
+  });
+  ctl.append(
+    mkbtn("pv-btn", "◀ 上一镜", ()=> jump(-1)),
+    bPlay,
+    mkbtn("pv-btn", "下一镜 ▶", ()=> jump(1)),
+    mkbtn("pv-btn", "✂ 在播放头切一刀", ()=> cutHere(v, video.currentTime || pv.t)),
+    bOnly,
+    timeEl
+  );
+  box.appendChild(ctl);
+
+  const keys = mk("div", "pv-key");
+  keys.innerHTML = `<kbd>空格</kbd> 播放/暂停　<kbd>←</kbd><kbd>→</kbd> 逐帧　<kbd>Shift</kbd>+方向 跳 1 秒　<kbd>K</kbd> 在播放头切一刀　<kbd>Esc</kbd> 收起`;
+  box.appendChild(keys);
+
+  const seekAt = clientX =>{
+    const r = tl.getBoundingClientRect();
+    const f = Math.min(1, Math.max(0, (clientX - r.left) / Math.max(1, r.width)));
+    const t = f * dur();
+    pv.t = t;
+    if(video.readyState >= 1) video.currentTime = Math.min(t, dur() - 0.02);
+    paint(t);
+  };
+  let dragging = false;
+  tl.addEventListener("pointerdown", e =>{
+    dragging = true;
+    try{ tl.setPointerCapture(e.pointerId); }catch(_){}
+    seekAt(e.clientX);
+  });
+  tl.addEventListener("pointermove", e =>{ if(dragging) seekAt(e.clientX); });
+  const endDrag = e =>{
+    dragging = false;
+    try{ tl.releasePointerCapture(e.pointerId); }catch(_){}
+  };
+  tl.addEventListener("pointerup", endDrag);
+  tl.addEventListener("pointercancel", endDrag);
+
+  const loop = ()=>{
+    if(!document.body.contains(video)) return;
+    enforceSel();
+    paint(video.currentTime);
+    if(!video.paused) requestAnimationFrame(loop);
+  };
+  video.addEventListener("loadedmetadata", ()=>{
+    if(pv.t > 0.02) video.currentTime = Math.min(pv.t, Math.max(0, (video.duration || dur()) - 0.05));
+    paint(pv.t);
+    if(pv.playing) video.play().catch(()=>{});
+  });
+  video.addEventListener("timeupdate", ()=>{ enforceSel(); paint(video.currentTime); });
+  video.addEventListener("seeking", ()=> paint(video.currentTime));
+  video.addEventListener("play", ()=>{
+    pv.playing = true; bPlay.textContent = "暂停";
+    enforceSel(true);
+    requestAnimationFrame(loop);
+  });
+  video.addEventListener("pause", ()=>{ pv.playing = false; bPlay.textContent = "播放"; });
+  video.addEventListener("ended", ()=>{ pv.playing = false; bPlay.textContent = "播放"; });
+  video.addEventListener("error", ()=>{
+    if(v._proxyBusy) return;            // 正在自动准备代理，别弹失败
+    if(pv.proxy){                       // 代理本身也放不了，说明代理坏了
+      stage.innerHTML = `<div class="pv-fail" style="color:#f0a9a3">预览代理损坏或不存在，重新生成一次试试。</div>`;
+      const b0 = mkbtn("ghost", "重新生成代理", ()=>{ v.proxyReady = false; v.needsProxy = false; runProxy(v, stage, plan, false); });
+      stage.querySelector(".pv-fail").appendChild(b0);
+      return;
+    }
+    const why = plan.why ? plan.why : "这种封装或编码浏览器解不了";
+    stage.innerHTML = `<div class="pv-fail">浏览器放不了这个文件：<b>${why}</b>。<br>
+      生成一份预览代理就能在这里拖动播放，原片不受影响，导出照旧用原片。</div>`;
+    const b = mkbtn("ghost", "生成预览代理", ()=> runProxy(v, stage, plan, false));
+    stage.querySelector(".pv-fail").appendChild(mk("br"));
+    stage.querySelector(".pv-fail").appendChild(b);
+  });
+
+  // 需要代理却还没有 → 自动准备，不用用户点
+  if(needProxy) prepareProxy(v, video, stage, plan);
+
+  return box;
+}
+
+/* 打开预览先确认一次最新状态，必要时自动生成代理 */
+async function prepareProxy(v, video, stage, plan){
+  if(v._proxyBusy) return;
+  v._proxyBusy = true;
+  try{
+    let r = null;
+    try{ r = await fetch("/api/probe?token=" + v.token).then(x=>x.json()); }catch(_){ }
+    if(r && !r.error){
+      v.plan = r.plan; v.proxyReady = !!r.proxyReady;
+      if(r.plan.mode === "direct") return;                  // 后端说能直接播
+      if(r.proxyReady){
+        v.needsProxy = true;
+        if(state.preview && state.preview.token === v.token && !state.preview.proxy){
+          state.preview.proxy = true;
+          refreshCard(v);
+        }
+        return;
+      }
+      plan = r.plan;
+    }
+    await runProxy(v, stage, plan, true);
+  } finally {
+    v._proxyBusy = false;
+  }
+}
+
+async function runProxy(v, holder, plan, auto){
+  v._proxyBusy = true;
+  const why = plan && plan.why ? plan.why : "";
+  const eta = plan && plan.eta ? plan.eta : "长片要等一会儿";
+  const r = await fetch("/api/proxy", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({token: v.token})}).then(x=>x.json()).catch(e=>({error:String(e)}));
+  if(r.error){
+    holder.innerHTML = `<div class="pv-fail" style="color:#f0a9a3">${r.error}</div>`;
+    v._proxyBusy = false;
+    return false;
+  }
+  return new Promise(resolve =>{
+    let iv = null;
+    const done = ()=>{
+      if(iv) clearInterval(iv);
+      v.needsProxy = true;
+      v.proxyReady = true;
+      if(state.preview && state.preview.token === v.token) state.preview.proxy = true;
+      v._proxyBusy = false;
+      refreshCard(v);
+      toast(auto ? "预览代理已就绪，已自动切换" : "预览代理已生成");
+      resolve(true);
+    };
+    if(r.ready){ done(); return; }
+    holder.innerHTML = `<div class="pv-fail">${why ? "浏览器放不了：" + why + "，":""}正在生成预览代理<br>
+      <span class="tiny">${eta}　原片不动，导出照旧用原片</span><br>
+      <span id="pprog" style="font-family:var(--mono);color:#fff">0%</span></div>`;
+    const skip = mkbtn("ghost", "先不转，稍后再说", ()=>{
+      if(iv) clearInterval(iv);
+      v._proxyBusy = false;
+      holder.innerHTML = `<div class="pv-fail">已转到后台继续准备，转好了再点「播放预览」就是直接可播的。<br>
+        <span class="tiny">只影响这里的预览，导出不受影响</span></div>`;
+      resolve(false);
+    });
+    skip.style.marginTop = "8px";
+    holder.querySelector(".pv-fail").appendChild(skip);
+    const t0 = Date.now();
+    iv = setInterval(async ()=>{
+      let j;
+      try{ j = await fetch("/api/job?id=" + r.job).then(x=>x.json()); }catch(e){ return; }
+      const el = holder.querySelector("#pprog");
+      if(j.error || j.state === "error"){
+        clearInterval(iv);
+        v._proxyBusy = false;
+        if(el){ el.textContent = "失败：" + (j.error || "未知错误"); el.style.color = "#f0a9a3"; }
+        resolve(false);
+        return;
+      }
+      if(j.state === "done"){ done(); return; }
+      if(el) el.textContent = `${Math.round((j.progress||0)*100)}%　已用 ${Math.round((Date.now()-t0)/1000)}s`;
+    }, 400);
+  });
+}
+
+async function applyCuts(v, cuts){
+  const before = v.scenes.map((s,i)=>({s:s.start, e:s.end, on: v.sel[i] !== false}));
+  toast("正在重建镜头…");
+  const r = await fetch("/api/scenes", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({token: v.token, cuts})}).then(x=>x.json());
+  if(r.error){ toast(r.error); return; }
+  v.scenes = r.video.scenes;
+  v.sel = v.scenes.map(s=>{
+    const hit = before.find(b => s.start >= b.s - 0.02 && s.start < b.e - 0.02);
+    return hit ? hit.on : true;
+  });
+  v.editing = false;
+  refreshCard(v);
+  toast(`已更新：${v.scenes.length} 个镜头`);
+}
+
+async function exportEdl(v){
+  const keep = v.sel.map((on,i)=>on?i:-1).filter(i=>i>=0);
+  if(!keep.length){ toast("先选中要导出的片段"); return; }
+  const r = await fetch("/api/edl", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({token: v.token, keep, out_dir: state.outdir || null})}).then(x=>x.json());
+  if(r.error){ toast(r.error); return; }
+  toast("EDL 已生成");
+  pushResult(`EDL 已生成 · ${r.n} 段`, [r.path], r.path.replace(/[\\/][^\\/]+$/, ""));
+}
+
+function refreshCard(v){
+  const old = document.querySelector(`.vcard[data-token="${v.token}"]`);
+  if(old) old.replaceWith(card(v));
+  updateFooter();
+}
+function refreshHead(v){ refreshCard(v); }
+
+function updateFooter(){
+  const total = state.videos.reduce((a,v)=>a + (v.status==="ready" ? v.sel.filter(Boolean).length : 0), 0);
+  $("#btn-export").disabled = total===0 || (state.job && state.job.state==="running");
+  $("#btn-export").textContent = total
+    ? (state.dedup ? `去重导出（${total}）` : `导出选中片段（${total}）`)
+    : "导出选中片段";
+  if(!state.job || state.job.state!=="running"){
+    const vids = state.videos.filter(v=>v.status==="ready").length;
+    $("#fstat").textContent = vids ? `${vids} 个视频已就绪 · 选中 ${total} 段` : "就绪";
+  }
+}
+
+/* ---------------- 上传 ---------------- */
+function uploadOne(file){
+  return new Promise((resolve,reject)=>{
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/upload?name=" + encodeURIComponent(file.name));
+    xhr.upload.onprogress = e =>{
+      const v = findVideoByName(file.name, file.size);
+      if(v && e.lengthComputable){ v.status="uploading"; v.progress = e.loaded/e.total; v.msg=`上传中 ${Math.round(v.progress*100)}%`; }
+    };
+    xhr.onload = ()=>{
+      try{
+        const r = JSON.parse(xhr.responseText);
+        if(r.ok) resolve(r.video); else reject(new Error(r.error||"上传失败"));
+      }catch(err){ reject(err); }
+    };
+    xhr.onerror = ()=> reject(new Error("网络错误"));
+    xhr.send(file);
+  });
+}
+function findVideoByName(name, size){
+  return state.videos.find(v=>v.name===name && v.size===size && v.token);
+}
+
+async function handleFiles(files){
+  const arr = [...files].filter(f=>f.size>0);
+  if(!arr.length) return;
+  for(const f of arr){
+    const placeholder = {token:"tmp"+Math.random().toString(16).slice(2,10), name:f.name, path:"", size:f.size,
+      uploaded:true, status:"uploading", err:"", progress:0, scenes:[], sel:[], fps:0, duration:0, msg:"上传中 0%"};
+    state.videos.push(placeholder);
+    render();
+    try{
+      const video = await uploadOne(f);
+      const idx = state.videos.indexOf(placeholder);
+      state.videos[idx] = {token:video.token, name:video.name, path:video.path, size:video.size, uploaded:true,
+        status:"pending", err:"", progress:0, scenes:[], sel:[], fps:0, duration:0, msg:""};
+      render();
+    }catch(err){
+      placeholder.status="error"; placeholder.err = err.message; render();
+    }
+  }
+  const pend = state.videos.filter(v=>v.status==="pending").map(v=>v.token);
+  if(pend.length) analyze(pend);
+}
+
+/* ---------------- 检测 ---------------- */
+async function analyze(tokens){
+  tokens = tokens.filter(t=>t && !t.startsWith("tmp"));
+  if(!tokens.length) return;
+  tokens.forEach(t=>{
+    const v = findVideo(t);
+    if(v){ v.status="analyzing"; v.progress=0; v.msg="排队中…"; v.err=""; }
+  });
+  render();
+  const r = await fetch("/api/analyze", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({tokens, params: state.params})}).then(x=>x.json());
+  if(r.error){ toast(r.error); return; }
+  poll(r.job);
+}
+
+function poll(jobId){
+  state.job = {id: jobId, state:"running", progress:0};
+  clearInterval(poll._t);
+  poll._t = setInterval(async ()=>{
+    let j;
+    try{ j = await fetch("/api/job?id="+jobId).then(x=>x.json()); }catch(e){ return; }
+    if(j.error){ clearInterval(poll._t); return; }
+    state.job = j;
+    $("#fbar").style.width = Math.round((j.progress||0)*100) + "%";
+    $("#fbar").parentElement.classList.toggle("on", j.state === "running");
+    $("#fstat").textContent = j.message || "";
+    (j.results||[]).forEach(res=>{
+      const v = findVideo(res.token);
+      if(!v) return;
+      if(res.ok){
+        const vd = res.video;
+        Object.assign(v, {status:"ready", scenes: vd.scenes, fps: vd.fps, duration: vd.duration});
+        v.sel = vd.scenes.map(()=>true);
+      }else{
+        Object.assign(v, {status:"error", err: res.error || "检测失败"});
+      }
+    });
+    if(j.state !== "running"){
+      clearInterval(poll._t);
+      render();
+      if(j.kind==="export" && (j.files||[]).length) showExport(j);
+      $("#fbar").classList.remove("on");
+      $("#fbar").style.width = j.state==="done" ? "100%" : "0%";
+      if(j.state==="error") toast(j.error || "任务失败");
+      if(j.kind==="analyze" && j.state==="done"){ $("#fstat").textContent = j.message; }
+    }
+  }, 400);
+}
+
+/* ---------------- 导出 ---------------- */
+$("#btn-export").onclick = async ()=>{
+  const items = state.videos.filter(v=>v.status==="ready")
+    .map(v=>({token:v.token, keep: v.sel.map((on,i)=>on?i:-1).filter(i=>i>=0)}))
+    .filter(it=>it.keep.length);
+  if(!items.length){ toast("还没有选中任何片段"); return; }
+  $("#results").innerHTML = "";
+  $("#btn-export").disabled = true;
+  const r = await fetch("/api/export", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({items, mode: state.mode, out_dir: state.outdir || null,
+                          dedup: state.dedup ? state.dedupLevel : null})}).then(x=>x.json());
+  if(r.error){ toast(r.error); $("#btn-export").disabled=false; return; }
+  toast(state.dedup ? "先去重，再导出…" : (state.mode==="copy" ? "开始无损导出…" : "开始重编码导出…"));
+  poll(r.job);
+};
+
+function pushResult(title, lines, dir){
+  const box = mk("div", "result");
+  box.appendChild(mk("h4", "", title));
+  const ul = mk("ul", "");
+  lines.forEach(t=>{
+    const li = mk("li", "", t);
+    ul.appendChild(li);
+  });
+  box.appendChild(ul);
+  if(dir){
+    const b = mkbtn("ghost", "打开文件夹", ()=> openFolder(dir));
+    b.style.marginTop = "10px";
+    box.appendChild(b);
+    const c = mkbtn("ghost", "复制路径", async ()=>{
+      toast(await copyText(dir) ? "路径已复制" : "复制失败，请手动选择文本");
+    });
+    c.style.marginTop = "10px";
+    c.style.marginLeft = "8px";
+    box.appendChild(c);
+  }
+  $("#results").prepend(box);
+}
+
+function showExport(j){
+  const ok = j.files.filter(f=>f.ok), bad = j.files.filter(f=>!f.ok);
+  const d = j.dedup || null;
+  const skipped = (d && d.skipped) || [];
+  const dir = ok.length ? ok[0].path.replace(/[\\/][^\\/]+$/, "") : "";
+  const box = document.createElement("div");
+  box.className = "result";
+  box.innerHTML = `<h4>导出完成 · 成功 ${ok.length} 个${bad.length?` · 失败 ${bad.length} 个`:""}${
+      skipped.length ? ` · 去重省 ${skipped.length} 段` : ""}</h4>
+    <div class="tiny" style="margin-bottom:8px;word-break:break-all">${dir}</div>
+    <ul>${ok.slice(-8).map(f=>`<li>${f.path.split(/[\\/]/).pop()} · ${fmtSize(f.size||0)}</li>`).join("")}
+    ${bad.map(f=>`<li style="color:var(--err)">失败：${f.error}</li>`).join("")}</ul>
+    ${dedupHtml(d)}`;
+  const btn = document.createElement("button");
+  btn.className = "ghost"; btn.textContent = "打开文件夹"; btn.style.marginTop = "10px";
+  btn.onclick = ()=> openFolder(dir || state.lastOut);
+  box.appendChild(btn);
+  const cpy = document.createElement("button");
+  cpy.className = "ghost"; cpy.textContent = "复制路径";
+  cpy.style.marginTop = "10px"; cpy.style.marginLeft = "8px";
+  cpy.onclick = async ()=> toast(await copyText(dir) ? "路径已复制" : "复制失败，请手动选择文本");
+  box.appendChild(cpy);
+  $("#results").appendChild(box);
+  state.lastOut = dir;
+  $("#btn-open").style.display = "inline";
+  $("#btn-open").onclick = ()=> openFolder(state.lastOut);
+}
+
+const LVL = { conservative:"保守", normal:"标准", aggressive:"激进" };
+function dedupHtml(d){
+  if(!d) return "";
+  if(d.error) return `<div class="dd"><span class="warn">去重没跑完：${d.error}　已按原样导出</span></div>`;
+  const sk = d.skipped || [];
+  const head = sk.length
+    ? `<b>${d.before}</b> 段 → <b>${d.after}</b> 段，跳过 ${sk.length} 段（约 ${fmtDur(d.saved||0)}）`
+    : `${d.before} 段里没有发现重复`;
+  const list = sk.length ? `
+    <details><summary>看看跳过了哪 ${sk.length} 段</summary>
+      <ul>${sk.map(s=>`<li>${s.name} <i>${s.reason}${s.dist?` · 差异 ${s.dist}/256`:""} → 保留 ${s.keep}</i></li>`).join("")}</ul>
+    </details>` : "";
+  const warn = d.no_fp ? `<div class="warn">${d.no_fp} 段抽帧失败，只做了区间重叠判断</div>` : "";
+  return `<div class="dd"><div class="dd-h">去重（${LVL[d.level]||d.level}）：${head}</div>${list}${warn}</div>`;
+}
+
+/* ---------------- 交互 ---------------- */
+const drop = $("#drop");
+drop.onclick = e =>{ if(!e.target.closest("button,input,label")) $("#file").click(); };
+$("#btn-browse").onclick = e =>{ e.stopPropagation(); $("#file").click(); };
+
+/* 粘贴路径直接引用（不依赖系统对话框） */
+const addByPath = async () =>{
+  const inp = $("#pathinput");
+  const raw = (inp.value || "").trim();
+  if(!raw){ inp.focus(); toast("先把视频完整路径粘进来，例如 D:\\素材\\a.mp4"); return; }
+  const r = await fetch("/api/addpath", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({paths: raw})}).then(x=>x.json()).catch(e=>({error:"请求失败："+e.message}));
+  if(r.error){ toast(r.error, 5000); return; }
+  r.videos.forEach(addCard);
+  if(r.failed && r.failed.length) toast(`有 ${r.failed.length} 个路径没找到，已跳过`, 4000);
+  inp.value = "";
+  analyze(r.videos.map(v=>v.token));
+};
+$("#btn-addpath").onclick = e =>{ e.stopPropagation(); addByPath(); };
+$("#pathinput").onkeydown = e =>{ if(e.key === "Enter"){ e.preventDefault(); e.stopPropagation(); addByPath(); } };
+$("#pathinput").onpointerdown = e => e.stopPropagation();
+$("#pathinput").onclick = e => e.stopPropagation();
+
+let pickBusy = false;
+$("#btn-pick").onclick = async e =>{
+  e.stopPropagation();
+  if(pickBusy) { toast("已经有一个选择窗口在打开了，请稍等或看任务栏", 4000); return; }
+  const btn = $("#btn-pick");
+  const label = btn.textContent;
+  pickBusy = true;
+  btn.style.minWidth = btn.offsetWidth + "px";
+  btn.disabled = true;
+  btn.textContent = "正在打开选择窗口…";
+  toast("正在打开系统文件选择窗口", 2500);
+  const hint = setTimeout(()=>{
+    if(pickBusy) btn.textContent = "等待选择窗口（没看到？用下面那行粘贴路径）";
+  }, 8000);
+  const ctrl = new AbortController();
+  const guard = setTimeout(()=>ctrl.abort(), 85000);
+  try{
+    const r = await fetch("/api/pick", {method:"POST", signal: ctrl.signal}).then(x=>x.json());
+    if(r.state === "busy"){ toast("已经有一个选择窗口打开了，请先处理它", 4000); return; }
+    if(r.error){ toast(r.error, 6000); return; }
+    if(r.state === "cancel"){ return; }
+    if(!r.videos || !r.videos.length){ toast("没有拿到可读取的文件"); return; }
+    r.videos.forEach(addCard);
+    analyze(r.videos.map(v=>v.token));
+  }catch(err){
+    if(err.name === "AbortError") toast("等太久没响应，已中止。请再试一次，或用下面那行直接粘贴路径", 6000);
+    else toast("打开选择窗口失败：" + err.message, 5000);
+  }finally{
+    clearTimeout(hint);
+    clearTimeout(guard);
+    pickBusy = false;
+    btn.disabled = false;
+    btn.textContent = label;
+    btn.style.minWidth = "";
+  }
+};
+$("#file").onchange = e =>{ handleFiles(e.target.files); e.target.value=""; };
+
+["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev, e=>{
+  e.preventDefault(); e.stopPropagation(); drop.classList.add("hot");
+}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev, e=>{
+  e.preventDefault(); e.stopPropagation(); drop.classList.remove("hot");
+}));
+drop.addEventListener("drop", e=>{
+  const files = e.dataTransfer.files;
+  if(files && files.length) handleFiles(files);
+});
+document.addEventListener("dragover", e=>e.preventDefault());
+document.addEventListener("drop", e=>e.preventDefault());
+
+/* ---------------- 快捷键（预览打开时生效） ---------------- */
+document.addEventListener("keydown", e=>{
+  const pv = state.preview;
+  if(!pv) return;
+  const t = e.target;
+  if(t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+  const root = document.querySelector(`.vcard[data-token="${pv.token}"]`);
+  const video = root && root.querySelector("video");
+  const v = findVideo(pv.token);
+  if(!video || !v) return;
+  const total = v.duration || video.duration || 0;
+  const step = e.shiftKey ? 1 : 1/25;
+  if(e.code === "Space"){
+    e.preventDefault();
+    if(video.paused) video.play().catch(()=>{}); else video.pause();
+  } else if(e.key === "ArrowLeft"){
+    e.preventDefault();
+    video.currentTime = Math.max(0, video.currentTime - step);
+    paintActive(video.currentTime);
+  } else if(e.key === "ArrowRight"){
+    e.preventDefault();
+    video.currentTime = Math.min(total ? total - 0.02 : 1e9, video.currentTime + step);
+    paintActive(video.currentTime);
+  } else if(e.key === "k" || e.key === "K"){
+    e.preventDefault();
+    cutHere(v, video.currentTime);
+  } else if(e.key === "Escape"){
+    e.preventDefault();
+    state.preview = null;
+    refreshCard(v);
+  }
+});
+
+/* ---------------- 启动 ---------------- */
+(async function boot(){
+  try{
+    const h = await fetch("/api/health").then(x=>x.json());
+    DET = h.detectors;
+    $("#chip-engine").textContent = "PySceneDetect " + h.scenedetect;
+    // h.ffmpeg 是可执行文件名（如 ffmpeg.exe），别再拼一遍「ffmpeg」
+    const ffOk = h.ffmpeg && h.ffmpeg !== "未找到";
+    $("#chip-ff").textContent = ffOk ? "ffmpeg 已就绪" : "ffmpeg 未找到";
+    $("#chip-ff").title = ffOk ? ("使用：" + h.ffmpeg) : "没找到 ffmpeg，切割和流水线都用不了";
+    $("#dot").classList.toggle("off", !h.ok);
+    const d = DET[state.params.detector];
+    state.params.threshold = d.default;
+    $("#thr").value = d.default;
+    $("#thr-v").textContent = fmtThr(d.default, state.params.detector);
+    renderDets();
+  }catch(e){
+    $("#chip-engine").textContent = "服务未连接";
+    $("#dot").classList.add("off");
+    toast("无法连接本地服务，请确认启动窗口仍在运行");
+  }
+  render();
+})();
+</script>
+</body>
+</html>

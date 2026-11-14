@@ -69,6 +69,9 @@ import pipeline as pipe  # noqa: E402
 
 pipe.configure(FFMPEG, NO_WINDOW)
 
+import director as dirw  # noqa: E402  （一键导演，依赖 pipe 的 ffmpeg 配置）
+import qc as qcmod       # noqa: E402  （成片体检：黑边/字幕/静音/音量）
+
 
 def _log_open(msg: str) -> None:
     try:
@@ -78,8 +81,27 @@ def _log_open(msg: str) -> None:
         pass
 
 
-def open_in_explorer(target: str | None) -> tuple[bool, str]:
-    """在资源管理器中打开目录 / 定位文件。返回 (成功?, 实际路径或错误说明)。"""
+def _unlock_foreground() -> None:
+    """解除 Windows 前台锁定：我们的服务没有自己的前台窗口，从这里调起的
+    资源管理器会被系统压在用户正在用的窗口后面。先模拟一次 ALT 键按下/抬起，
+    系统就认为「用户刚输入过」，允许把新窗口带到最上层。"""
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        user32.keybd_event(0x12, 0, 0, 0)        # ALT down
+        user32.keybd_event(0x12, 0, 0x0002, 0)   # ALT up (KEYEVENTF_KEYUP)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def open_in_explorer(target: str | None) -> dict:
+    """在资源管理器中打开目录 / 定位文件。
+
+    返回 {ok, path, fallback?/error}。fallback=True 表示原目标不存在、
+    实际打开的是它最近的上级目录——前端要提示出来，否则就是「打开的文件夹不对」。
+    """
     raw = (target or "").strip().strip('"').strip("'")
     p = Path(raw) if raw else EXPORTS
     try:
@@ -89,8 +111,10 @@ def open_in_explorer(target: str | None) -> tuple[bool, str]:
         p = Path(os.path.normpath(str(p)))
     except Exception as exc:
         _log_open(f"FAIL 规范化路径出错 raw={raw!r} err={exc}")
-        return False, f"路径无效：{raw}"
+        return {"ok": False, "error": f"路径无效：{raw}"}
 
+    want = str(p)
+    fell_back = False
     if not p.exists():
         # 逐级回退到最近仍存在的父目录，比直接报错更有用
         q = p
@@ -98,26 +122,44 @@ def open_in_explorer(target: str | None) -> tuple[bool, str]:
             q = q.parent
         _log_open(f"MISS {p} -> fallback {q}")
         if not q.exists():
-            return False, f"目录不存在：{p}"
+            return {"ok": False, "error": f"目录不存在：{p}"}
         p = q
+        fell_back = str(p) != want
 
     target_s = str(p)
     is_dir = p.is_dir()
-    # 目录直接进入；文件用 /select, 在父目录中选中
-    cmds = []
-    if is_dir:
-        cmds.append(["explorer.exe", target_s])
-    else:
-        cmds.append(["explorer.exe", f"/select,{target_s}"])
-    cmds.append(["cmd", "/c", "start", "", target_s])
-
     last_err = ""
+
+    # 目录一定先走 ShellExecute：explorer.exe 如果带着 CREATE_NO_WINDOW 启动，
+    # 它会把命令行参数丢掉，直接打开默认位置（桌面）——这就是「打开的文件夹不对」的真凶。
+    if is_dir:
+        try:
+            _unlock_foreground()
+            os.startfile(target_s)  # noqa: S606
+            _log_open(f"OK   {target_s}  via=startfile(dir)")
+            return {"ok": True, "path": target_s, "fallback": fell_back}
+        except Exception as exc:  # noqa: BLE001
+            last_err = f"startfile: {exc}"
+            _log_open(f"FAIL {target_s}  via=startfile(dir) err={exc}")
+
+    # 文件用 /select, 在父目录里选中；explorer 本身没有控制台，**绝不能带
+    # STARTF_USESHOWWINDOW/SW_HIDE**——explorer 会照着这个 show 状态开窗，
+    # 窗口直接被藏起来，看起来就是「点了没反应」。SW_HIDE 只用于 cmd 兜底。
+    cmds = [["explorer.exe", f"/select,{target_s}"], ["cmd", "/c", "start", "", target_s]]
+    _unlock_foreground()
+
+    si = None
+    if os.name == "nt":
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0          # 只给 cmd 兜底用，藏掉它的控制台窗口
+
     for argv in cmds:
         try:
             proc = subprocess.Popen(
                 argv, shell=False,
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                creationflags=NO_WINDOW,
+                startupinfo=(si if argv[0] == "cmd" else None),
             )
         except Exception as exc:
             last_err = f"{argv[0]}: {exc}"
@@ -128,22 +170,23 @@ def open_in_explorer(target: str | None) -> tuple[bool, str]:
         except subprocess.TimeoutExpired:
             # 还活着 = explorer 正作为常驻 shell 服务，视为成功
             _log_open(f"OK   {target_s}  via={argv[0]} (running pid={proc.pid})")
-            return True, target_s
+            return {"ok": True, "path": target_s, "fallback": fell_back}
         # explorer.exe 正常打开也返回 1，只有明显异常码才继续尝试下一种方式
         if rc in (0, 1):
             _log_open(f"OK   {target_s}  via={argv[0]} rc={rc} is_dir={is_dir}")
-            return True, target_s
+            return {"ok": True, "path": target_s, "fallback": fell_back}
         last_err = f"{argv[0]} 退出码 {rc}"
         _log_open(f"FAIL {target_s}  via={argv[0]} rc={rc}")
 
     try:
+        _unlock_foreground()
         os.startfile(target_s)  # noqa: S606
         _log_open(f"OK   {target_s}  via=startfile")
-        return True, target_s
+        return {"ok": True, "path": target_s, "fallback": fell_back}
     except Exception as exc:
         last_err = last_err or str(exc)
         _log_open(f"FAIL {target_s}  via=startfile err={exc}")
-        return False, f"无法调起资源管理器（{last_err}）"
+        return {"ok": False, "error": f"无法调起资源管理器（{last_err}）"}
 
 
 VIDEOS: dict[str, dict] = {}
@@ -177,6 +220,47 @@ def new_job(kind: str, total: int) -> dict:
 
 def push_log(job: dict, msg: str) -> None:
     job["message"] = msg
+
+
+class _BatchJob(dict):
+    """把单条渲染的进度折算进整批，其余字段直通真实 job。
+
+    直接传真实 job：每条渲染都会把 progress 从 0 跑到 1，进度条来回跳。
+    传副本又不行：compose 里 job_gate 读的 cancel/pause 必须实时反映
+    /api/job/control 写进去的值，副本读不到。
+    """
+
+    def __init__(self, base: dict, k: int, n: int):
+        self._base = base
+        self._k = int(k)
+        self._n = max(1, int(n))
+
+    def __getitem__(self, key):
+        return self._base[key]
+
+    def __setitem__(self, key, val):
+        if key == "progress":
+            try:
+                inner = min(1.0, max(0.0, float(val or 0)))
+            except (TypeError, ValueError):
+                inner = 0.0
+            val = (self._k + inner) / self._n
+        elif key == "message":
+            val = "[%d/%d] %s" % (self._k + 1, self._n, val)
+        self._base[key] = val
+
+    def get(self, key, default=None):
+        return self._base.get(key, default)
+
+    def __contains__(self, key):
+        return key in self._base
+
+    def setdefault(self, key, default=None):
+        return self._base.setdefault(key, default)
+
+    def update(self, *a, **kw):
+        for kk, vv in dict(*a, **kw).items():
+            self[kk] = vv
 
 
 def _run_job(job: dict, fn, *args, **kwargs) -> None:
@@ -845,6 +929,8 @@ try{
   $d=New-Object System.Windows.Forms.FolderBrowserDialog
   $d.Description='选择素材文件夹（里面放切片视频）'
   $d.ShowNewFolderButton=$false
+  $start=$env:SHOTCUTTER_PICK_START
+  if($start -and (Test-Path -LiteralPath $start -PathType Container)){ $d.SelectedPath=$start }
   $r=$d.ShowDialog($owner)
   $owner.Close()
   if($r -eq [System.Windows.Forms.DialogResult]::OK){ Write-Output $d.SelectedPath }
@@ -855,7 +941,355 @@ try{
 """
 
 
-def pick_folder() -> dict:
+def _nearest_dir(raw: str) -> str:
+    """把用户填的路径收敛成一个真实存在的目录，用作选择窗口的起点。
+
+    填的是文件就取它所在的目录，填的层级不存在就往上找；
+    找不到就返回空，让对话框用它自己的默认位置。
+    """
+    t = str(raw or "").strip().strip('"').strip("'")
+    if not t:
+        return ""
+    p = Path(t)
+    for _ in range(8):
+        try:
+            if p.is_dir():
+                return str(p)
+            if p.exists():
+                return str(p.parent)
+        except OSError:
+            pass
+        if not p.parent or p.parent == p:
+            break
+        p = p.parent
+    return ""
+
+
+LASTDIR = pipe.PIPE / "lastdir.json"
+
+
+def _last_dir() -> str:
+    """上次用过的素材目录，选择窗口的兜底起点（不然永远跳回桌面）。"""
+    try:
+        d = json.loads(LASTDIR.read_text(encoding="utf-8")).get("dir") or ""
+    except Exception:  # noqa: BLE001
+        return ""
+    return _nearest_dir(str(d))
+
+
+def _preview_voice(pid: str, idx: int) -> tuple[str, str]:
+    """给 BGM 混音试听找一条配音轨：优先指定项目，否则用最近一个有配音的项目。
+
+    返回 (音频路径, 人话说明)。找不到返回 ("", "")。
+    """
+    label = ""
+    p, s, _ = _pipe_get(pid, idx)
+    a = ((s or {}).get("tts") or {}).get("audio") if s else None
+    if a and Path(a).exists():
+        nm = (p or {}).get("product", {}).get("name") or (p or {}).get("name") or "项目"
+        return str(a), "「%s」的配音" % nm
+    # 指定项目还没配音（或没指定）：退到最近一个有配音的项目
+    root = pipe.PIPE / "projects"
+    try:
+        pjs = sorted(root.glob("*/project.json"), key=lambda f: f.stat().st_mtime, reverse=True)
+    except OSError:
+        pjs = []
+    for f in pjs[:30]:
+        try:
+            d = json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for sc in d.get("scripts") or []:
+            aa = ((sc.get("tts") or {}).get("audio") or "")
+            if aa and Path(aa).exists():
+                nm = (d.get("product") or {}).get("name") or d.get("name") or "项目"
+                return str(aa), "最近一条「%s」的配音（当前方案还没渲染过）" % nm
+    return "", ""
+
+
+def _bgm_preview(bgm, voice: str, vol: float, fade: float, dur: float) -> Path:
+    """按合成时的同一条滤镜链混一小段音频，返回 mp3 缓存文件。
+
+    bgm 可以是本地文件路径，也可以是在线曲库的 https 直链（ffmpeg 直接拉流）。
+    """
+    vdur = pipe.media_duration(voice) or dur
+    total = max(3.0, min(dur, vdur))
+    try:
+        vmtime = int(Path(voice).stat().st_mtime)
+    except OSError:
+        vmtime = 0
+    key = "%s|%s|%.3f|%.2f|%.2f|%d" % (bgm, voice, vol, fade, total, vmtime)
+    h = hashlib.md5(key.encode("utf-8", "replace")).hexdigest()[:16]
+    cache = pipe.WORK / "bgm_prev"
+    cache.mkdir(parents=True, exist_ok=True)
+    out = cache / ("mix_%s.mp3" % h)
+    if out.exists() and out.stat().st_size > 1024:
+        return out
+    tmp = out.with_suffix(".tmp.mp3")
+    # 和 compose 的混音完全一致：voice 直通 + bgm volume/淡入淡出 + amix(normalize=0) + alimiter
+    chain = "[1:a]volume=%.3f,atrim=0:%.3f,asetpts=N/SR/TB" % (vol, total)
+    if fade > 0.05 and total > fade * 2:
+        chain += ",afade=t=in:st=0:d=%.2f" % fade
+        chain += ",afade=t=out:st=%.2f:d=%.2f" % (total - fade, fade)
+    filt = [chain + "[bg]",
+            "[0:a]volume=1.0[voice]",
+            "[voice][bg]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
+            "alimiter=limit=0.95[aout]"]
+    args = ["-v", "error", "-y", "-i", voice, "-stream_loop", "-1", "-i", str(bgm),
+            "-filter_complex", ";".join(filt),
+            "-map", "[aout]", "-t", "%.3f" % total,
+            "-c:a", "libmp3lame", "-q:a", "4", str(tmp)]
+    r = subprocess.run([pipe.FFMPEG] + args, capture_output=True, text=True,
+                       timeout=120, creationflags=NO_WINDOW)
+    if r.returncode != 0 or not tmp.exists():
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError((r.stderr or "").strip()[-300:] or "ffmpeg 混音失败")
+    tmp.replace(out)
+    return out
+
+
+# ---------------------------------------------------------------- 在线 BGM 曲库（incompetech，CC-BY 4.0 免费可商用）
+import urllib.request  # noqa: E402
+
+INC_BASE = "https://incompetech.com/music/royalty-free"
+INC_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+_ONLINE = {"at": 0.0, "pieces": [], "genres": {}, "err": ""}
+_ONLINE_TTL = 86400.0
+
+
+def _http_open(url: str, headers: dict | None = None, timeout: int = 30):
+    """先直连，失败再走系统代理（用户常开代理但软件不一定在跑）。"""
+    hs = {"User-Agent": INC_UA}
+    if headers:
+        hs.update(headers)
+    req = urllib.request.Request(url, headers=hs)
+    try:
+        return urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=timeout)
+    except Exception:
+        return urllib.request.urlopen(req, timeout=timeout)
+
+
+def _online_catalog(force: bool = False) -> tuple[list, dict, str]:
+    """拉取/缓存在线曲库目录（pieces.json + genre.json，内存缓存一天）。"""
+    if not force and _ONLINE["pieces"] and time.time() - _ONLINE["at"] < _ONLINE_TTL:
+        return _ONLINE["pieces"], _ONLINE["genres"], ""
+    try:
+        with _http_open(INC_BASE + "/pieces.json", timeout=40) as r:
+            pieces = json.loads(r.read().decode("utf-8"))
+        with _http_open(INC_BASE + "/genre.json", timeout=20) as r:
+            genres = {str(g.get("id")): str(g.get("genre") or "") for g in json.loads(r.read().decode("utf-8"))}
+        if not isinstance(pieces, list) or not pieces:
+            raise RuntimeError("目录是空的")
+    except Exception as exc:  # noqa: BLE001
+        msg = "在线曲库拉取失败：%s" % exc
+        _ONLINE["err"] = msg
+        return _ONLINE["pieces"], _ONLINE["genres"], msg
+    _ONLINE.update({"pieces": pieces, "genres": genres, "at": time.time(), "err": ""})
+    return pieces, genres, ""
+
+
+def _online_url(fn: str) -> str:
+    return INC_BASE + "/mp3-royaltyfree/" + quote(fn)
+
+
+def _online_find(fn: str) -> dict | None:
+    for p in _ONLINE["pieces"]:
+        if p.get("filename") == fn:
+            return p
+    return None
+
+
+def _online_search(q: str, limit: int = 60) -> list[dict]:
+    pieces, genres, _ = _online_catalog()
+    words = [w for w in (q or "").lower().replace(",", " ").split() if w]
+    out = []
+    for p in pieces:
+        genre = genres.get(str(p.get("genre")), "")
+        hay = " ".join(str(p.get(k) or "") for k in ("title", "feel", "instruments", "bpm", "description")) + " " + genre
+        hay = hay.lower()
+        if words and not all(w in hay for w in words):
+            continue
+        m = re.match(r"(\d+):(\d+):(\d+)", str(p.get("length") or ""))
+        dur = (int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))) if m else 0
+        out.append({"title": str(p.get("title") or ""), "fn": str(p.get("filename") or ""),
+                    "dur": dur, "feel": str(p.get("feel") or ""), "genre": genre,
+                    "bpm": str(p.get("bpm") or ""), "instruments": str(p.get("instruments") or "")[:60]})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _online_download(fn: str) -> tuple[str, str]:
+    """下载在线曲目入库。返回 (本地路径, 消息)。"""
+    pieces, genres, err = _online_catalog()
+    if err:
+        raise RuntimeError(err)
+    p = _online_find(fn)
+    if not p:
+        raise RuntimeError("曲目不在目录里：%s" % fn)
+    dirs = pipe.bgm_dirs()
+    if dirs:
+        dest_dir = Path(dirs[0])
+    else:                     # 一个目录都没加：建一个本地曲库目录并挂到配置上
+        dest_dir = pipe.WORK / "bgm_lib"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    safe = re.sub(r'[\\/:*?"<>|]+', "_", str(p.get("title") or fn)).strip() or fn
+    dest = dest_dir / ("%s - Kevin MacLeod.mp3" % safe)
+    if dest.exists() and dest.stat().st_size > 1024:
+        return str(dest), "之前下过，已在曲库里"
+    tmp = dest.with_suffix(".part.mp3")
+    try:
+        with _http_open(_online_url(fn), timeout=180) as r, tmp.open("wb") as f:
+            while True:
+                buf = r.read(262144)
+                if not buf:
+                    break
+                f.write(buf)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+    if tmp.stat().st_size < 1024:
+        tmp.unlink(missing_ok=True)
+        raise RuntimeError("下载的文件太小，可能失败了")
+    tmp.replace(dest)
+    if not dirs:              # 把新建的目录登记进配置，曲库列表能扫到
+        cfg = pipe.load_cfg()
+        cfg["video"]["bgm_dirs"] = [str(dest_dir)]
+        pipe.save_cfg(cfg)
+    # CC-BY 4.0 要求署名：在曲库目录里维护一份对照表
+    credit = dest_dir / "BGM 署名对照.txt"
+    line = "《%s》 · Music: %s by Kevin MacLeod (incompetech.com) · CC BY 4.0（把这句放进视频简介即可）" % (
+        p.get("title"), p.get("title"))
+    try:
+        old = credit.read_text(encoding="utf-8") if credit.exists() else ""
+        if line not in old:
+            credit.write_text((old.rstrip() + "\n" + line + "\n").lstrip(), encoding="utf-8")
+    except OSError:
+        pass
+    return str(dest), "已下载入库"
+
+
+def remember_dir(path: str) -> None:
+    d = _nearest_dir(path)
+    if not d:
+        return
+    try:
+        LASTDIR.parent.mkdir(parents=True, exist_ok=True)
+        LASTDIR.write_text(json.dumps({"dir": d, "at": time.time()}, ensure_ascii=False),
+                           encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+# ---------------- 拖拽文件夹：把「文件夹名」解析成本机路径 ----------------
+# 浏览器出于安全不给拖入文件的完整路径，只给名字。
+# 所以拖进来后端负责找：先在已知目录（含各层父目录）下面拼，拼不到就浅扫盘符。
+
+_SKIP_SCAN = {"windows", "program files", "program files (x86)", "appdata", "$recycle.bin",
+              "system volume information", "node_modules", "perflogs", "recovery",
+              "config.msi", "msocache", "intel", "amd", "nvidia"}
+
+
+def _scan_dirs(seeds: list, want: str, depth: int = 3,
+               max_seen: int = 60000, budget_s: float = 6.0) -> list:
+    """从 seeds 往下浅扫（BFS，限深限量限时），找名字等于 want 的目录。"""
+    t0 = time.time()
+    want_l = want.strip().strip("\\/").lower()
+    hits: list = []
+    seen = 0
+    stack = [(Path(s), 0) for s in seeds]
+    while stack and seen < max_seen and time.time() - t0 < budget_s:
+        d, lv = stack.pop()
+        if lv > depth:
+            continue
+        try:
+            entries = list(os.scandir(d))
+        except OSError:
+            continue
+        for e in entries:
+            seen += 1
+            if seen >= max_seen or time.time() - t0 > budget_s:
+                break
+            nm = e.name
+            low = nm.lower()
+            if nm.startswith((".", "$")) or low in _SKIP_SCAN:
+                continue
+            try:
+                if not e.is_dir(follow_symlinks=False):
+                    continue
+            except OSError:
+                continue
+            if low == want_l:
+                hits.append(e.path)
+            if lv < depth:
+                stack.append((Path(e.path), lv + 1))
+    return hits
+
+
+def _mtime_of(p) -> float:
+    try:
+        return Path(p).stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def resolve_dropped(names, known) -> dict:
+    names = [str(x).strip().strip("\\/") for x in (names or []) if str(x).strip()][:10]
+    known = [str(x) for x in (known or []) if str(x).strip()][:50]
+    roots: list = []
+
+    def _add(p) -> None:
+        try:
+            if p and p.is_dir() and str(p) not in roots:
+                roots.append(str(p))
+        except OSError:
+            pass
+
+    # 已知目录和它们的各层父目录都算 root：拖进来的多半和上次用的目录是邻居
+    for k in known + [_last_dir()]:
+        p = Path(_nearest_dir(k) or "")
+        while p and p != p.parent:
+            _add(p)
+            p = p.parent
+        if p:
+            _add(p)
+    # 兜底扫描的种子：非系统盘的盘符根 + 用户主目录
+    seeds = list(roots)
+    for d in "DEFGHIJKLMNOPQRSTUVWXYZ":
+        dr = Path(d + ":\\")
+        if dr.is_dir():
+            seeds.append(str(dr))
+    home = Path.home()
+    _add(home)
+    if str(home) not in seeds:
+        seeds.append(str(home))
+
+    out: dict = {}
+    for nm in names:
+        hits: list = []
+        want_l = nm.lower()
+        for r in roots:                       # 先直接拼，绝大多数情况这一步就中
+            cand = Path(r) / nm
+            try:
+                if cand.is_dir():
+                    hits.append(str(cand))
+            except OSError:
+                pass
+            if Path(r).name.lower() == want_l and r not in hits:
+                hits.append(r)                # 上次用的目录本身就是要找的那个
+        if not hits:
+            hits = _scan_dirs(seeds, nm)
+        uniq: list = []
+        for h in hits:
+            if h not in uniq:
+                uniq.append(h)
+        uniq.sort(key=_mtime_of, reverse=True)      # 最近动过的排前面
+        out[nm] = uniq[:8]
+    return {"ok": True, "found": out, "roots": len(roots)}
+
+
+def pick_folder(start: str = "") -> dict:
     if not PICK_GUARD.acquire(blocking=False):
         return {"state": "busy", "path": "", "message": "已经有一个选择窗口打开了"}
     proc = None
@@ -864,6 +1298,9 @@ def pick_folder() -> dict:
             ["powershell", "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-Command", _PS_FOLDER],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            # 起始目录用环境变量传，省得路径里的引号/中文在命令行上被吃掉
+            env={**os.environ,
+                 "SHOTCUTTER_PICK_START": _nearest_dir(start) or _last_dir()},
         )
         try:
             out_b, _ = proc.communicate(timeout=PICK_TIMEOUT)
@@ -880,6 +1317,7 @@ def pick_folder() -> dict:
             return {"state": "error", "path": "", "message": next(ln[9:] for ln in lines if ln.startswith("__ERROR__"))}
         if not lines or "__CANCEL__" in lines:
             return {"state": "cancel", "path": "", "message": ""}
+        remember_dir(lines[-1])
         return {"state": "ok", "path": lines[-1], "message": ""}
     except Exception as exc:  # noqa: BLE001
         return {"state": "error", "path": "", "message": "打开选择窗口失败：%s" % exc}
@@ -1009,6 +1447,98 @@ def register_path(path: str, uploaded: bool = False) -> dict | None:
     with LOCK:
         VIDEOS[token] = info
     return info
+
+
+# ---------------------------------------------------------------- 方案 / 渲染
+
+def _text_overlap(a: dict, b: dict) -> float:
+    """两份脚本台词的重合度。用来判断「重挑」到底有没有换内容。
+
+    素材短的时候（一条 25 秒的素材只有 8 句，第一版就全用完了）排除旧句后
+    无句可挑，重挑会原样返回同一批句子——肉眼看就是「点了没反应」。
+    """
+    def key(s):
+        t = s.get("tts") or {}
+        return {str(x.get("text") or "").strip() for x in (t.get("sentences") or [])
+                if str(x.get("text") or "").strip()}
+    ka, kb = key(a), key(b)
+    if not ka or not kb:
+        return 0.0
+    return len(ka & kb) / max(len(ka), len(kb))
+
+
+def plan_view(p: dict) -> list[dict]:
+    """把项目里的候选脚本整理成前端卡片要的样子。"""
+    out = []
+    for i, s in enumerate(p.get("scripts") or []):
+        t = s.get("tts") or {}
+        sents = t.get("sentences") or []
+        out.append({
+            "idx": i,
+            "route": s.get("route") or "source",
+            "angle": s.get("angle_label") or "",
+            "total": round(float(t.get("total") or 0), 1),
+            "count": len(sents),
+            "source": s.get("source_name") or "",
+            "seed": int(s.get("seed") or 0),
+            "note": s.get("note") or "",
+            "numbers": s.get("check_numbers") or [],
+            "lines": [str(x.get("text") or "") for x in sents],
+            "why": ((s.get("picks") or [{}])[0].get("why") or ""),
+        })
+    return out
+
+
+def render_scripts(job: dict, p: dict, idxs: list, cfg: dict) -> tuple[list, list]:
+    """按方案号逐条对齐 + 渲染。单条失败不拖垮整批。"""
+    n = len(idxs)
+    outs, fails = [], []
+    scripts = p.get("scripts") or []
+    for k, si in enumerate(idxs):
+        pipe.job_gate(job)
+        job["state"] = "running"
+        if not (0 <= si < len(scripts)):
+            fails.append({"idx": si, "err": "方案不存在"})
+            continue
+        s = scripts[si]
+        acfg = dirw.align_cfg(cfg, s)
+        try:
+            job["message"] = "[%d/%d] 分镜…" % (k + 1, n)
+            pipe.align(p, s, acfg, seed=None if k == 0 else k * 13 + 7)
+            pipe.project_save(p)
+            job["message"] = "[%d/%d] 渲染…" % (k + 1, n)
+            pipe.compose_worker(p, s, acfg, _BatchJob(job, k, n),
+                                variant=("V%d" % (k + 1)) if n > 1 else "")
+            outs.append(job.get("result") or {})
+        except pipe.JobCancelled:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            fails.append({"idx": si, "err": str(exc)[:180]})
+            job["message"] = "[%d/%d] 失败：%s" % (k + 1, n, str(exc)[:60])
+        job["done"] = k + 1
+        job["total"] = n
+    # 最后一条 compose 会把 state 写成 done，这里必须交回 running：
+    # 后面还要跑体检，提前 done 会让前端收工、读到还没赋值的 result。
+    if not job.get("cancel"):
+        job["state"] = "running"
+    return outs, fails
+
+
+def qc_outputs(outs: list, job: dict, cfg: dict) -> None:
+    """渲染完顺手体检一遍（结果进缓存，成片列表里直接看分数）。
+
+    体检失败不影响成片，也不该让整批报错——单条兜住。
+    """
+    files = [str(o.get("out")) for o in outs if o.get("out")]
+    if not files or job.get("cancel"):
+        return
+    job["state"] = "running"
+    for k, f in enumerate(files):
+        if job.get("cancel"):
+            return
+        job["message"] = "[%d/%d] 体检 %s…" % (k + 1, len(files), Path(f).name)
+        qcmod.audit_safe(f, cfg, force=True)
+    job["state"] = "running"
 
 
 # ---------------------------------------------------------------- HTTP
@@ -1174,6 +1704,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(job)
         elif u.path in ("/pipeline", "/pipe.html"):
             self._file(WEB / "pipe.html", "text/html; charset=utf-8")
+        elif u.path in ("/one", "/one.html"):
+            self._file(WEB / "one.html", "text/html; charset=utf-8")
         elif u.path == "/api/pipe/config":
             self._json(pipe.public_cfg())
         elif u.path == "/api/pipe/desub/info":
@@ -1269,6 +1801,129 @@ class Handler(BaseHTTPRequestHandler):
                 self._stream(f)
             else:
                 self.send_error(404)
+        elif u.path == "/api/pipe/bgm/preview":
+            # BGM 混音试听：配音轨 + BGM 按当前音量/淡入淡出混一小段，和成片里的听感一致
+            # bgm= 本地路径，或 fn= 在线曲库文件名（转成直链交给 ffmpeg 拉流）
+            bgm = (q.get("bgm") or [""])[0]
+            ofn = (q.get("fn") or [""])[0]
+            if ofn and not bgm:
+                pieces, genres, oerr = _online_catalog()
+                if oerr:
+                    self._json({"ok": False, "error": oerr}, 502)
+                    return
+                if not _online_find(ofn):
+                    self._json({"ok": False, "error": "曲目不在在线目录里"}, 404)
+                    return
+                bgm = _online_url(ofn)
+            pid = (q.get("pid") or [""])[0]
+            try:
+                idx = int((q.get("idx") or ["0"])[0])
+            except ValueError:
+                idx = 0
+            try:
+                vol = max(0.0, min(2.0, float((q.get("vol") or ["0.1"])[0])))
+            except ValueError:
+                vol = 0.1
+            try:
+                fade = max(0.0, min(5.0, float((q.get("fade") or ["0"])[0])))
+            except ValueError:
+                fade = 0.0
+            try:
+                dur = max(5.0, min(60.0, float((q.get("dur") or ["20"])[0])))
+            except ValueError:
+                dur = 20.0
+            if bgm.startswith("http://") or bgm.startswith("https://"):
+                ok = True               # 在线直链：ffmpeg 拉流，不做本地校验
+                f = None
+            else:
+                f = Path(bgm) if bgm else None
+                ok = False
+                if f:
+                    try:
+                        ok = f.is_file() and f.suffix.lower() in pipe.AUDIO_EXT
+                    except OSError:
+                        ok = False
+            if not ok:
+                self._json({"ok": False, "error": "先选一首 BGM 再试听混音"}, 400)
+                return
+            voice, vlabel = _preview_voice(pid, idx)
+            if not voice:
+                self._json({"ok": False,
+                            "error": "还没有配音轨：先渲染一条成片（A/B 路线都行），再来调 BGM 音量"},
+                           404)
+                return
+            try:
+                out = _bgm_preview(bgm, voice, vol, fade, dur)
+            except Exception as exc:  # noqa: BLE001
+                self._json({"ok": False, "error": "混音失败：%s" % exc}, 500)
+                return
+            try:
+                data = out.read_bytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "audio/mpeg")
+                self.send_header("Content-Length", str(len(data)))
+                self.send_header("X-Voice", quote(vlabel))
+                self.send_header("Access-Control-Expose-Headers", "X-Voice")
+                self.end_headers()
+                if not self.head_only:
+                    self.wfile.write(data)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+        elif u.path == "/api/pipe/bgm/online/search":
+            qs = unquote(u.query)
+            qq = dict(parse_qs(qs)).get("q", [""])[0].strip()
+            refresh = dict(parse_qs(qs)).get("refresh", [""])[0] == "1"
+            if refresh:
+                _ONLINE.update({"pieces": [], "at": 0.0})
+            items = _online_search(qq)
+            if not _ONLINE["pieces"]:
+                self._json({"ok": False, "error": _ONLINE["err"] or "在线曲库是空的"}, 502)
+                return
+            self._json({"ok": True, "items": items, "total": len(_ONLINE["pieces"])})
+        elif u.path == "/api/pipe/bgm/online/audio":
+            # 在线曲目流式代理（透传 Range，浏览器才能拖进度条、边下边播）
+            fn = (q.get("fn") or [""])[0]
+            pieces, genres, oerr = _online_catalog()
+            if oerr:
+                self._json({"ok": False, "error": oerr}, 502)
+                return
+            if not fn or not _online_find(fn):
+                self._json({"ok": False, "error": "曲目不存在"}, 404)
+                return
+            try:
+                headers = {}
+                rng = (self.headers.get("Range") or "").strip()
+                if rng:
+                    headers["Range"] = rng
+                resp = _http_open(_online_url(fn), headers=headers, timeout=90)
+            except Exception as exc:  # noqa: BLE001
+                self._json({"ok": False, "error": "拉取失败：%s" % exc}, 502)
+                return
+            try:
+                self.send_response(resp.status if hasattr(resp, "status") else 200)
+                ct = resp.headers.get("Content-Type") or ""
+                if "audio" not in ct and fn.lower().endswith(".mp3"):
+                    ct = "audio/mpeg"          # 上游有时回 octet-stream，浏览器 <audio> 需要音频类型
+                if ct:
+                    self.send_header("Content-Type", ct)
+                for h in ("Content-Length", "Content-Range", "Accept-Ranges"):
+                    v = resp.headers.get(h)
+                    if v:
+                        self.send_header(h, v)
+                self.end_headers()
+                if not self.head_only:
+                    while True:
+                        buf = resp.read(65536)
+                        if not buf:
+                            break
+                        self.wfile.write(buf)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            finally:
+                try:
+                    resp.close()
+                except Exception:
+                    pass
         elif u.path == "/api/pipe/audio":
             p, s, err = _pipe_get((q.get("pid") or [""])[0], (q.get("idx") or ["0"])[0])
             audio = (s or {}).get("tts", {}).get("audio")
@@ -1302,10 +1957,19 @@ class Handler(BaseHTTPRequestHandler):
                         it["kbps"] = pipe._kbps(st.st_size, float(it.get("dur") or 0))
                     if not it.get("dur"):
                         it["dur"] = 0
+                    it["qc"] = qcmod.digest(f)      # 只读缓存，没体检过就是 null
                     items.append(it)
             except Exception:
                 pass
             self._json({"ok": True, "items": items})
+        elif u.path == "/api/pipe/qc":
+            name = Path((q.get("name") or [""])[0]).name
+            force = (q.get("force") or [""])[0] in ("1", "true", "yes")
+            f = pipe.OUT / name
+            if not name or not f.exists():
+                self._json({"error": "这条成片不在了：%s" % name}, 404)
+                return
+            self._json({"ok": True, "qc": qcmod.audit_safe(f, pipe.load_cfg(), force=force)})
         elif re.fullmatch(r"/[\w\-.]+\.(html|css|js|svg|png|ico)", u.path):
             f = WEB / u.path.lstrip("/")
             if f.exists() and f.is_file():
@@ -1366,6 +2030,17 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         payload = self._body_json()
+        if u.path == "/api/pipe/bgm/online/download":
+            fn = str(payload.get("fn") or "")
+            if not fn:
+                self._json({"ok": False, "error": "缺 fn"}, 400)
+                return
+            try:
+                path, msg = _online_download(fn)
+            except Exception as exc:  # noqa: BLE001
+                self._json({"ok": False, "error": "下载失败：%s" % exc}, 500)
+                return
+            self._json({"ok": True, "path": path, "message": msg})
 
         if u.path == "/api/addpath":
             raw = payload.get("paths")
@@ -1471,11 +2146,11 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if u.path == "/api/openfolder":
-            ok, detail = open_in_explorer(payload.get("path"))
-            if ok:
-                self._json({"ok": True, "path": detail})
+            res = open_in_explorer(payload.get("path"))
+            if res.get("ok"):
+                self._json(res)
             else:
-                self._json({"error": detail}, 404)
+                self._json({"error": res.get("error") or "打开失败"}, 404)
             return
 
         # ---------------- 成片流水线 ----------------
@@ -1488,7 +2163,11 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if u.path == "/api/pipe/dialog":
-            self._json(pick_folder())
+            self._json(pick_folder(str(payload.get("path") or payload.get("folder") or "")))
+            return
+
+        if u.path == "/api/pipe/resolve":
+            self._json(resolve_dropped(payload.get("names") or [], payload.get("known") or []))
             return
 
         if u.path == "/api/pipe/llm/start":
@@ -1534,6 +2213,204 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": str(exc)}, 400)
             return
 
+        if u.path == "/api/pipe/plan":
+            # 只出方案、不渲染：先给几个方向，停下来等人挑
+            raw = payload.get("folders")
+            if isinstance(raw, (list, tuple)):
+                folders = [str(x) for x in raw]
+            else:
+                folders = [payload.get("folder") or ""]
+            norm = []
+            for f in folders:
+                for line in str(f).replace(";", "\n").splitlines():
+                    line = line.strip().strip('"').strip("'")
+                    if line and line not in norm:
+                        norm.append(line)
+            product = payload.get("product") or {}
+            try:
+                target = float(payload.get("target") or 45)
+                count = max(1, min(10, int(payload.get("count") or payload.get("variants") or 3)))
+                mix = max(0.0, min(1.0, float(payload.get("visual_mix", 0.5))))
+                seed0 = max(0, int(payload.get("seed0") or 0))
+                rep = payload.get("replace_idx", None)
+                rep = None if rep in (None, "", "-1", -1) else int(rep)
+            except (TypeError, ValueError):
+                self._json({"error": "时长/条数/空镜比例填的不是数字"}, 400)
+                return
+            mode = str(payload.get("mode") or "auto").lower()
+            if mode not in ("auto", "source", "script"):
+                mode = "auto"
+            use_llm = bool(payload.get("use_llm", True))
+            topup = bool(payload.get("topup", False))
+            p = pipe.project_load(payload.get("pid") or "")
+            if not p:
+                p = pipe.project_new(product.get("name") or "一键成片")
+            elif rep is None:
+                p["scripts"] = []      # 重新出方案 = 换一批候选，不在旧的后面叠加
+            cfg = pipe.load_cfg()
+            job = new_job("plan", 100)
+
+            def _plan(job=job, p=p, product=product, target=target, cfg=cfg,
+                      use_llm=use_llm, norm=norm, mix=mix, mode=mode, topup=topup,
+                      count=count, seed0=seed0, rep=rep):
+                job["message"] = "体检素材…"
+                old = None
+                if rep is not None:
+                    cur = p.get("scripts") or []
+                    if 0 <= rep < len(cur):
+                        old = cur[rep]
+                # 重挑要锁定这一条原来用的素材，否则会从素材列表第一条重新分配，
+                # 挑出来还是同一条片，等于白点
+                only = [old.get("source_path")] if (old and old.get("source_path")) else None
+                avoid = None
+                if old:
+                    avoid = [str(x.get("text") or "").strip()
+                             for x in ((old.get("tts") or {}).get("sentences") or [])
+                             if str(x.get("text") or "").strip()]
+                base = len(p.get("scripts") or [])
+                info = dirw.director_worker(job, p, product, target, cfg, use_llm,
+                                            "keep", norm, mix, True, mode, topup,
+                                            1 if rep is not None else count, seed0,
+                                            only, avoid)
+                job["state"] = "running"
+                # 重挑但换不出新句子（这条素材的句子被第一版用光了）时，改走 AI 写稿换角度：
+                # 用户点「重挑」是想看见一条不一样的，返回同一批句子等于没反应。
+                if rep is not None and old:
+                    fresh = (p.get("scripts") or [])[-1]
+                    if _text_overlap(old, fresh) >= 0.7:
+                        job["message"] = "素材句数不够，改用 AI 写稿换角度…"
+                        # director_worker 自己会把 job 标成 done，第二次调用前必须复位：
+                        # 不复位的话前端轮询立刻看到 done，读到的是空方案列表。
+                        job["state"] = "running"
+                        job["progress"] = 0.0
+                        p["scripts"].pop()          # 撤掉这次挑的，下面会重新算
+                        info = dirw.director_worker(job, p, product, target, cfg, use_llm,
+                                                    "keep", norm, 0.0, True, "script",
+                                                    topup, 1, seed0 + 1)
+                        job["state"] = "running"
+                        fresh = (p.get("scripts") or [])[-1]
+                        fresh["note"] = ((fresh.get("note") or "")
+                                         + "；这条素材的句子第一版已用光，改用 AI 写稿换了个角度"
+                                         ).strip("；")
+                        info["switched"] = "script"
+                # 把「本次新加的脚本」并回列表：重挑时替换掉旧的那一条，
+                # 出方案时整体换掉。不能靠 pop()——切换路线后列表可能只剩一条。
+                lst = p.get("scripts") or []
+                new_ones = lst[base:]
+                del lst[base:]
+                if rep is not None:
+                    if new_ones and 0 <= rep < len(lst):
+                        lst[rep] = new_ones[-1]
+                    elif new_ones:
+                        lst.append(new_ones[-1])
+                else:
+                    lst[:] = new_ones
+                for i, s in enumerate(lst):
+                    s["idx"] = i
+                p["scripts"] = lst
+                p["active"] = 0
+                pipe.project_save(p)
+                job["result"] = {"pid": p["id"], "plans": plan_view(p), "info": info}
+                job["state"] = "done"
+                job["progress"] = 1.0
+                job["message"] = "出了 %d 个方案，挑一个渲染" % len(p.get("scripts") or [])
+
+            threading.Thread(target=_run_job, args=(job, _plan), daemon=True).start()
+            self._json({"ok": True, "job": job["id"], "pid": p["id"]})
+            return
+
+        if u.path == "/api/pipe/render":
+            p = pipe.project_load(payload.get("pid") or "")
+            if not p:
+                self._json({"error": "项目不存在"}, 404)
+                return
+            scripts = p.get("scripts") or []
+            raw = payload.get("idxs", None)
+            if raw in (None, ""):
+                idxs = list(range(len(scripts)))
+            elif isinstance(raw, (list, tuple)):
+                idxs = [int(x) for x in raw]
+            else:
+                idxs = [int(raw)]
+            idxs = [i for i in idxs if 0 <= i < len(scripts)][:20]
+            if not idxs:
+                self._json({"error": "没有可渲染的方案"}, 400)
+                return
+            cfg = pipe.load_cfg()
+            job = new_job("render", len(idxs))
+
+            def _run(job=job, p=p, idxs=idxs, cfg=cfg):
+                outs, fails = render_scripts(job, p, idxs, cfg)
+                qc_outputs(outs, job, cfg)
+                job["result"] = {"pid": p["id"], "outs": outs, "failed": fails, "idxs": idxs}
+                job["state"] = "done"
+                job["progress"] = 1.0
+                job["done"] = len(idxs)
+                job["total"] = len(idxs)
+                job["message"] = "出片 %d/%d 条%s" % (
+                    len(outs), len(idxs), "，%d 条失败" % len(fails) if fails else "")
+
+            threading.Thread(target=_run_job, args=(job, _run), daemon=True).start()
+            self._json({"ok": True, "job": job["id"], "pid": p["id"], "count": len(idxs)})
+            return
+
+        if u.path == "/api/pipe/direct":
+            raw = payload.get("folders")
+            if isinstance(raw, (list, tuple)):
+                folders = [str(x) for x in raw]
+            else:
+                folders = [payload.get("folder") or ""]
+            norm = []
+            for f in folders:
+                for line in str(f).replace(";", "\n").splitlines():
+                    line = line.strip().strip('"').strip("'")
+                    if line and line not in norm:
+                        norm.append(line)
+            product = payload.get("product") or {}
+            try:
+                target = float(payload.get("target") or 45)
+                variants = max(1, min(10, int(payload.get("variants") or 1)))
+                mix = max(0.0, min(1.0, float(payload.get("visual_mix", 0.5))))
+            except (TypeError, ValueError):
+                self._json({"error": "时长/条数/空镜比例填的不是数字"}, 400)
+                return
+            use_llm = bool(payload.get("use_llm", True))
+            mode = str(payload.get("mode") or "auto").lower()
+            if mode not in ("auto", "source", "script"):
+                mode = "auto"
+            topup = bool(payload.get("topup", False))
+            p = pipe.project_load(payload.get("pid") or "")
+            if not p:
+                p = pipe.project_new(product.get("name") or "一键成片")
+            cfg = pipe.load_cfg()
+            job = new_job("direct", 100)
+
+            def _one(job=job, p=p, product=product, target=target,
+                     variants=variants, mix=mix, use_llm=use_llm, norm=norm, cfg=cfg,
+                     mode=mode, topup=topup):
+                job["message"] = "先给素材做体检…"
+                info = dirw.director_worker(job, p, product, target, cfg, use_llm,
+                                            "keep", norm, mix, True, mode, topup,
+                                            variants)
+                # 现在每条版本都是一份独立脚本（A 换素材/换挑法，B 换角度）
+                idxs = info.get("script_idxs") or [info["script_idx"]]
+                outs, fails = render_scripts(job, p, idxs, cfg)
+                qc_outputs(outs, job, cfg)
+                n = len(idxs)
+                job["result"] = {"pid": p["id"], "idx": info["script_idx"],
+                                 "info": info, "outs": outs, "failed": fails}
+                job["state"] = "done"
+                job["progress"] = 1.0
+                job["done"] = n
+                job["total"] = n
+                job["message"] = "出片 %d/%d 条（原声 %d / 配音 %d）%s" % (
+                    len(outs), n, info.get("plan", []).count("source"),
+                    info.get("plan", []).count("script"),
+                    "，%d 条失败" % len(fails) if fails else "")
+            threading.Thread(target=_run_job, args=(job, _one), daemon=True).start()
+            self._json({"ok": True, "job": job["id"], "pid": p["id"]})
+            return
+
         if u.path == "/api/pipe/scan":
             raw = payload.get("folders")
             if isinstance(raw, (list, tuple)):
@@ -1558,6 +2435,8 @@ class Handler(BaseHTTPRequestHandler):
                     job["message"] = "扫描 %d 个文件夹…" % len(folders)
                     res = pipe.scan_folders(folders, job)
                     job["result"] = res
+                    # 记住这次扫的目录，下次「选择文件夹」从这里开始，别再跳回桌面
+                    remember_dir(norm[0])
                     msg = "新增 %d 个素材（%d 个目录，共扫描 %d 个视频）" % (
                         res["added"], len(res["folders"]), res["total"])
                     if res.get("existed"):
@@ -1849,6 +2728,19 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "job": job["id"]})
             return
 
+        if u.path == "/api/pipe/qc":
+            names = [Path(str(x)).name for x in (payload.get("names") or []) if str(x).strip()][:200]
+            if not names:
+                self._json({"error": "先在成片列表里选要体检的片子"}, 400)
+                return
+            force = bool(payload.get("force", True))
+            job = new_job("qc", len(names))
+            threading.Thread(target=_run_job,
+                             args=(job, qcmod.qc_worker, names, job, pipe.load_cfg(), force),
+                             daemon=True).start()
+            self._json({"ok": True, "job": job["id"], "count": len(names)})
+            return
+
         if u.path == "/api/pipe/batch":
             p = pipe.project_load(payload.get("pid") or "")
             if not p:
@@ -1918,6 +2810,8 @@ def main() -> None:
     print(f"\n  镜头切割器已启动：{url}\n  关闭此窗口即停止服务\n")
     if "--no-browser" not in sys.argv:
         threading.Timer(0.7, lambda: webbrowser.open(url)).start()
+    # 后台预热在线 BGM 目录（不挡启动；首次搜索不用等几十秒）
+    threading.Thread(target=_online_catalog, daemon=True).start()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

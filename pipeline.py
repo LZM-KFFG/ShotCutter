@@ -3097,6 +3097,14 @@ def compose_worker(project: dict, script: dict, cfg: dict, job: dict, variant: s
         chain = ("[%d:v]setpts=PTS-STARTPTS,fps=%d,"
                  "scale=%d:%d:force_original_aspect_ratio=%s,"
                  "crop=%d:%d,setsar=1" % (i, FPS, W, H, fit, W, H))
+        # 一键出片自动抹掉源片烧进去的硬字幕（delogo，实时速度）。
+        # 配在 pipeline.json 的 director.delogo，格式 x:y:w:h，按**源片分辨率**给；
+        # 没配就是空串，下面这段等于不存在，不影响原来的五步流程。
+        _dl = str(((cfg.get("director") or {}).get("delogo") or "")).strip()
+        if _dl:
+            # 放在 scale+crop 之后：这样框的坐标永远按输出画布算，
+            # 素材分辨率不一时才不会报 "Logo area is outside of the frame"。
+            chain = chain.replace(",setsar=1", ",setsar=1,delogo=%s" % _dl, 1)
         if slow > 1.02:
             chain += ",setpts=PTS*%.4f,fps=%d" % (slow, FPS)
         chain += ",tpad=stop_mode=clone:stop_duration=%.3f" % max(0.0, want - src * slow + 0.2)
