@@ -55,7 +55,7 @@ _lock = threading.Lock()
 VIDEO_EXT = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".flv", ".ts", ".m4v", ".wmv", ".mpg", ".mpeg", ".m2ts"}
 
 # 去硬字幕用的本机工具（Video Subtitle Remover），可在 pipeline.json 的 desub.root 改
-DEFAULT_VSR = r"D:\Tools\VSR"
+DEFAULT_VSR = r"D:\Tools\VSR140"
 
 EDGE_VOICES = [
     {"id": "zh-CN-XiaoxiaoNeural", "label": "晓晓 · 女 · 亲和自然", "gender": "女"},
@@ -88,7 +88,7 @@ DEFAULT_CFG = {
         "w": 1080, "h": 1920, "fps": 30, "crf": 21, "preset": "veryfast",
         "fit": "cover", "shot": 2.2, "min_shot": 1.0, "max_shot": 4.5,
         "subtitle": True, "sub_font": "Microsoft YaHei", "sub_size": 62,
-        "sub_margin": 0.17, "sub_outline": 3.2, "hook": True,
+        "sub_margin": 0.17, "sub_outline": 3.2, "hook": True, "sub_max_chars": 14,
         "bgm": "", "bgm_volume": 0.10,
         "bgm_dirs": [], "bgm_mode": "one", "bgm_fade": 0.8,
     },
@@ -226,19 +226,31 @@ def desub_root(cfg: dict | None = None) -> Path:
 
 
 def desub_info(cfg: dict | None = None) -> dict:
-    """探测 VSR：自带 Python + resources/run_with_area.py 是否都在，顺带读它的算法与检测开关。"""
+    """探测 VSR：自带 Python + resources/run_with_area.py 是否都在，顺带读它的算法与检测开关。
+    v1.4.0 的配置在 resources/settings.ini（旧版是 resources/backend/config.py）。"""
     root = desub_root(cfg)
     py = root / "Python" / "python.exe"
     entry = root / "resources" / "run_with_area.py"
     mode, detect = "", None
+    ini = root / "resources" / "settings.ini"
     try:
-        txt = (root / "resources" / "backend" / "config.py").read_text(encoding="utf-8", errors="replace")
-        m = re.search(r"^MODE\s*=\s*InpaintMode\.(\w+)", txt, re.M)
+        txt = ini.read_text(encoding="utf-8", errors="replace")
+        m = re.search(r"^\s*MODE\s*=\s*(\S+)", txt, re.M)
         mode = m.group(1) if m else ""
-        m2 = re.search(r"^STTN_SKIP_DETECTION\s*=\s*(\w+)", txt, re.M)
-        detect = (m2.group(1) == "False") if m2 else None
+        m2 = re.search(r"^\s*DETECT\s*=\s*(\w+)", txt, re.M)
+        detect = (m2.group(1).strip() in ("1", "true", "True")) if m2 else None
     except Exception:
         pass
+    if not mode:
+        try:
+            legacy = (root / "resources" / "backend" / "config.py").read_text(
+                encoding="utf-8", errors="replace")
+            m = re.search(r"^MODE\s*=\s*InpaintMode\.(\w+)", legacy, re.M)
+            mode = m.group(1) if m else ""
+            m2 = re.search(r"^STTN_SKIP_DETECTION\s*=\s*(\w+)", legacy, re.M)
+            detect = (m2.group(1) == "False") if m2 else None
+        except Exception:
+            pass
     return {
         "ok": py.exists() and entry.exists(),
         "root": str(root), "python": str(py), "entry": str(entry),
@@ -330,7 +342,10 @@ def _desub_one(src: Path, dst: Path, py: Path, cwd: Path, area, job: dict,
     env.update({"PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8",
                 "QPT_MODE": "Running", "QPT_COLOR": "False",
                 "VSR_ROOT": str(cwd.parent)})
-    proc = subprocess.Popen([str(py), str(ROOT / "vsr_runner.py"), str(src), arg, "1" if detect else "0"],
+    # v1.4.0 直接用 VSR140\resources\run_with_area.py（兼容旧参数：
+    # 视频 / 区域 / detect 0|1），不再走 vsr_runner.py 那套 v1.1.1 的 monkey patch
+    entry = Path(cwd) / "run_with_area.py"
+    proc = subprocess.Popen([str(py), str(entry), str(src), arg, "1" if detect else "0"],
                             cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             env=env, creationflags=NO_WINDOW)
     dec = codecs.getincrementaldecoder("utf-8")("replace")
@@ -3001,6 +3016,43 @@ def _wrap(text: str, per_line: int = 13) -> str:
     return r"\N".join(lines)
 
 
+def _split_cues(text: str, max_chars: int) -> list[str]:
+    """把一句字幕拆成多条单行字幕：优先在标点处断，没标点就均分硬切。
+
+    字幕只允许一行——宁可拆成两条先后出现，也不要折行盖住画面。
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+    if len(text) <= max_chars:
+        return [text]
+    parts = re.findall(r"[^，、；：,;!?！？。.\s]+[，、；：,;!?！？。.]*", text) or [text]
+    chunks, cur = [], ""
+    for p in parts:
+        if not cur:
+            cur = p
+        elif len(cur) + len(p) <= max_chars:
+            cur += p
+        else:
+            chunks.append(cur)
+            cur = p
+    if cur:
+        chunks.append(cur)
+    out: list[str] = []
+    for c in chunks:
+        c = c.strip()
+        if not c:
+            continue
+        if len(c) <= max_chars:
+            out.append(c)
+            continue
+        # 整段没有标点可断：按条数均分，避免最后一条只剩一两个字
+        k = -(-len(c) // max_chars)
+        size = -(-len(c) // k)
+        out.extend(c[i:i + size] for i in range(0, len(c), size))
+    return out or [text]
+
+
 def _tc(sec: float) -> str:
     if sec < 0:
         sec = 0
@@ -3034,9 +3086,23 @@ Style: Hook,%s,%d,&H0000E1FF,&H000000FF,&H00141414,&HA0000000,-1,0,0,0,100,100,1
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """ % (W, H, font, size, outline, mv, font, int(size * 1.1), outline + 0.6, int(H * 0.10))
     rows = []
+    # 字幕一行显示：按字数上限把长句拆成多条依次出现（不再用 \N 折行）
+    max_chars = int(v.get("sub_max_chars") or (14 if W <= 1080 else 16))
     for s in (script.get("tts") or {}).get("sentences") or []:
-        txt = _wrap(s["text"], 13 if W <= 1080 else 15)
-        rows.append("Dialogue: 0,%s,%s,Sub,,0,0,0,,%s" % (_tc(s["start"]), _tc(s["end"]), txt))
+        cues = _split_cues(str(s.get("text") or ""), max_chars)
+        if not cues:
+            continue
+        st, en = float(s["start"]), float(s["end"])
+        span = max(0.3, en - st)
+        total_chars = sum(len(c) for c in cues) or 1
+        t = st
+        for i, c in enumerate(cues):
+            if i == len(cues) - 1:
+                e = en
+            else:
+                e = min(en, max(t + 0.35, t + span * len(c) / total_chars))
+            rows.append("Dialogue: 0,%s,%s,Sub,,0,0,0,,%s" % (_tc(t), _tc(e), _ass_escape(c)))
+            t = e
     if v.get("hook"):
         hook_txt = str(script.get("title") or "")
         if not hook_txt:
