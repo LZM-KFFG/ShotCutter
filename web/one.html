@@ -580,6 +580,41 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
   </div>
 </div>
 
+<div class="modal" id="subpv">
+  <div class="sheet" style="max-width:880px">
+    <h3>字幕预览 <span class="hint">渲染前先看效果 · 黄色标题字幕可改文案 / 时长 / 字号</span></h3>
+
+    <div class="sec">
+      <div class="grid3">
+        <div><label class="f">黄字幕文案（留空 = 自动）</label><input type="text" id="hp-text" placeholder="如：这双鞋我穿了三个月"></div>
+        <div><label class="f">显示时长（秒）</label><input type="number" id="hp-dur" min="0.5" max="15" step="0.2"></div>
+        <div><label class="f">字号（0 = 跟随字幕）</label><input type="number" id="hp-size" min="0" max="160"></div>
+      </div>
+      <label class="hintline" style="display:flex;gap:6px;align-items:center;margin-top:8px">
+        <input type="checkbox" id="hp-on"> 显示黄色标题字幕</label>
+      <div class="row" style="margin-top:8px">
+        <button class="b sm" id="hp-save">保存并重预览</button>
+        <span class="hintline" id="hp-msg"></span>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:280px 1fr;gap:14px;margin-top:12px;align-items:start">
+      <div>
+        <div class="hintline" style="margin-bottom:6px">点条目看那一刻的画面</div>
+        <div id="hp-list" style="max-height:44vh;overflow:auto;border:1px solid var(--line);border-radius:9px"></div>
+      </div>
+      <div>
+        <img id="hp-img" alt="字幕预览" style="width:100%;border-radius:10px;background:#14120E;display:block">
+        <div class="hintline" id="hp-tip" style="margin-top:6px">预览取自成片画面，按画幅等比缩放；实际输出分辨率更高。</div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:16px;justify-content:flex-end">
+      <button class="g" id="hp-close">关闭</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -1633,16 +1668,78 @@ function renderPlans(){
     }
 
     const acts = mk("div", "acts");
+    const pv = mk("button", "g sm", "字幕");
+    pv.title = "预览这条方案的字幕，顺便调黄色标题字幕";
+    pv.onclick = ()=> openSubPv(PLAN.pid, p.idx);
     const redo = mk("button", "g sm", "重挑");
     redo.onclick = ()=> genPlans(p.idx, (p.seed || 0) + 1);
     const go1 = mk("button", "b sm", "渲染");
     go1.onclick = ()=> renderIdxs([p.idx]);
-    acts.appendChild(redo); acts.appendChild(go1);
+    acts.appendChild(pv); acts.appendChild(redo); acts.appendChild(go1);
     card.appendChild(acts);
     grid.appendChild(card);
   });
   box.appendChild(grid);
 }
+
+/* ---------- 字幕预览：渲染前检查，黄字幕可调 ---------- */
+const SUBPV = {pid: "", idx: 0, t: 1.0};
+async function openSubPv(pid, idx){
+  SUBPV.pid = pid; SUBPV.idx = idx;
+  const v = (S.cfg && S.cfg.video) || {};
+  $("#hp-text").value = v.hook_text || "";
+  $("#hp-dur").value = v.hook_dur || 3.2;
+  $("#hp-size").value = v.hook_size || 0;
+  $("#hp-on").checked = v.hook !== false;
+  $("#subpv").classList.add("on");
+  await loadSubPv();
+}
+async function loadSubPv(){
+  $("#hp-list").innerHTML = "";
+  $("#hp-msg").textContent = "读取字幕…";
+  const r = await api("/api/pipe/sub/cues?pid=" + encodeURIComponent(SUBPV.pid) + "&idx=" + SUBPV.idx);
+  if(r.error){ $("#hp-msg").textContent = r.error; return; }
+  const rows = [];
+  if(r.hook) rows.push({start:r.hook.start, end:r.hook.end, text:r.hook.text, hook:true});
+  (r.cues || []).forEach(c=> rows.push(c));
+  const list = $("#hp-list");
+  list.innerHTML = "";
+  rows.forEach((c, i)=>{
+    const row = mk("div");
+    row.style.cssText = "padding:6px 9px;border-bottom:1px solid var(--line);cursor:pointer;font-size:12px;line-height:1.5";
+    if(c.hook) row.style.cssText += "background:#FAEEDA;color:#8A5A10";
+    const tm = mk("span", "tc", fmtDur(c.start) + "  ");
+    tm.style.color = c.hook ? "#B07818" : "var(--dim)";
+    row.appendChild(tm);
+    row.appendChild(document.createTextNode(c.text + (c.hook ? "（标题）" : "")));
+    row.onclick = ()=> hpPreview((c.start + c.end) / 2);
+    list.appendChild(row);
+  });
+  $("#hp-msg").textContent = rows.length + " 条字幕 · 每行最多 " +
+    ((r.video && r.video.sub_max_chars) || 14) + " 字";
+  if(rows.length) hpPreview((rows[0].start + rows[0].end) / 2);
+}
+function hpPreview(t){
+  SUBPV.t = Math.max(0, t);
+  $("#hp-img").src = "/api/pipe/sub/preview?pid=" + encodeURIComponent(SUBPV.pid) +
+    "&idx=" + SUBPV.idx + "&t=" + SUBPV.t.toFixed(2) + "&v=" + Date.now();
+  $("#hp-tip").textContent = "预览时间 " + fmtDur(SUBPV.t) + " · 取自成片画面，按画幅等比缩放";
+}
+$("#hp-save").onclick = async ()=>{
+  $("#hp-msg").textContent = "保存中…";
+  const r = await api("/api/pipe/config", {video:{
+    hook: $("#hp-on").checked,
+    hook_text: $("#hp-text").value.trim(),
+    hook_dur: +$("#hp-dur").value || 3.2,
+    hook_size: +$("#hp-size").value || 0
+  }});
+  if(r.error){ $("#hp-msg").textContent = r.error; return; }
+  S.cfg = r.config;
+  await loadSubPv();
+  toast("已保存，重新渲染成片后生效");
+};
+$("#hp-close").onclick = ()=> $("#subpv").classList.remove("on");
+$("#subpv").onclick = e=> { if(e.target.id === "subpv") $("#subpv").classList.remove("on"); };
 
 /* 渲染完就地展示结果：出片页不再跳去流水线 */
 const RES = {dir: ""};

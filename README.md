@@ -271,7 +271,7 @@ B 路线配音片 -18.5 LUFS 正常）。
 |---|---|
 | `llm` | `base_url` / `api_key` / `model` / `vision_model`：任意 OpenAI 兼容接口；`local_dir` / `local_port` / `local_extra`：本地 llama.cpp 一键启停 |
 | `tts` | `engine`（`edge` / `sapi`）、`voice`、`rate`、`gap` |
-| `video` | `w` `h` `fps` `crf` `preset` `fit`、镜头时长 `shot` / `min_shot` / `max_shot`、字幕 `subtitle` `sub_font` `sub_size` `sub_margin` `sub_outline` `sub_max_chars`（单行字数上限，超出自动拆条）、`hook` |
+| `video` | `w` `h` `fps` `crf` `preset` `fit`、镜头时长 `shot` / `min_shot` / `max_shot`、字幕 `subtitle` `sub_font` `sub_size` `sub_margin` `sub_outline` `sub_max_chars`（单行字数上限，超出自动拆条）、封面黄字幕 `hook` `hook_text`（留空自动）`hook_dur` `hook_size`（0=跟随字幕） |
 | `video.bgm*` | `bgm_mode`（none / random / one）、`bgm_dirs`、`bgm_volume`、`bgm_fade` |
 | `desub` | `root`：VSR 安装目录，默认 `D:\Tools\VSR`；里面要有 `Python\python.exe` 和 `resources\backend` |
 

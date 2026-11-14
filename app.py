@@ -1388,7 +1388,7 @@ VU_BIN = VU_ROOT / "tools" / "ffmpeg-9.0.2-essentials_build" / "bin"
 VU_FFPROBE = VU_BIN / "ffprobe.exe"
 VU_OUT = VU_ROOT / "output"
 
-VSR_ROOT = Path(r"D:\Tools\VSR")
+VSR_ROOT = Path(r"D:\Tools\VSR140")
 VSR_PY = VSR_ROOT / "Python" / "python.exe"
 VSR_RES = VSR_ROOT / "resources"
 VSR_RUN = VSR_RES / "run_with_area.py"
@@ -1707,7 +1707,8 @@ def _sub_pump(stream):
                         SUB_JOB.frame, SUB_JOB.total = int(mc.group(1)), int(mc.group(2))
                         if pct <= 0 and SUB_JOB.total:
                             pct = SUB_JOB.frame / SUB_JOB.total * 100
-                    SUB_JOB.percent = min(99.5, (pct / 2 if stage[0] == "find" else 50 + pct / 2))
+                    # v1.4.0 只有一个 0~100% 的总进度条，不再分「找字幕/修画面」两段
+                    SUB_JOB.percent = min(99.5, pct)
                 continue
             if low and not low.startswith("\x1b"):
                 SUB_JOB.log(line)
@@ -2165,6 +2166,33 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"items": [{"key": k, "label": v["label"], "hint": v.get("hint") or "",
                                    "group": v.get("group") or "classic"}
                                   for k, v in pipe.ANGLES.items()]})
+        elif u.path in ("/api/pipe/sub/cues", "/api/pipe/sub/preview"):
+            pid = (q.get("pid") or [""])[0]
+            try:
+                idx = int((q.get("idx") or ["0"])[0] or 0)
+                at = float((q.get("t") or ["1.0"])[0] or 1.0)
+            except ValueError:
+                self._json({"error": "参数不对"}, 400)
+                return
+            p = pipe.project_load(pid)
+            scripts = (p or {}).get("scripts") or []
+            if not p or not (0 <= idx < len(scripts)):
+                self._json({"error": "找不到这条方案"}, 404)
+                return
+            cfg = pipe.load_cfg()
+            if u.path == "/api/pipe/sub/cues":
+                plan = pipe.sub_plan(p, scripts[idx], cfg)
+                self._json({"ok": True, "idx": idx,
+                            "video": {"w": cfg["video"]["w"], "h": cfg["video"]["h"],
+                                      "sub_max_chars": plan["max_chars"]},
+                            "hook": plan["hook"], "cues": plan["cues"]})
+                return
+            try:
+                img = pipe.sub_preview(p, scripts[idx], cfg, at)
+            except Exception as exc:  # noqa: BLE001
+                self._json({"error": str(exc)}, 400)
+                return
+            self._file(img, "image/jpeg")
         elif u.path == "/api/pipe/llm/local":
             try:
                 found = pipe.scan_local()

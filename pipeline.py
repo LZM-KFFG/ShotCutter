@@ -89,6 +89,7 @@ DEFAULT_CFG = {
         "fit": "cover", "shot": 2.2, "min_shot": 1.0, "max_shot": 4.5,
         "subtitle": True, "sub_font": "Microsoft YaHei", "sub_size": 62,
         "sub_margin": 0.17, "sub_outline": 3.2, "hook": True, "sub_max_chars": 14,
+        "hook_text": "", "hook_dur": 3.2, "hook_size": 0,
         "bgm": "", "bgm_volume": 0.10,
         "bgm_dirs": [], "bgm_mode": "one", "bgm_fade": 0.8,
     },
@@ -3062,6 +3063,49 @@ def _tc(sec: float) -> str:
     return "%d:%02d:%05.2f" % (h, m, s)
 
 
+def hook_text(project: dict, script: dict, cfg: dict) -> str:
+    """封面黄字幕的文案：配置里手填的优先，留空就按标题/品名自动生成。"""
+    v = cfg.get("video") or {}
+    txt = str(v.get("hook_text") or "").strip()
+    if txt:
+        return txt[:40]
+    txt = str(script.get("title") or "").strip()
+    if txt:
+        return txt[:24]
+    pname = str((project.get("product") or {}).get("name") or "")
+    return "｜".join(x for x in (pname, script.get("angle_label") or "") if x)[:24]
+
+
+def sub_plan(project: dict, script: dict, cfg: dict) -> dict:
+    """把字幕拆成「封面黄字幕 + 逐条单行字幕」。渲染和预览共用同一份结果，改完立刻能对得上。"""
+    v = cfg["video"]
+    W = int(v["w"])
+    max_chars = int(v.get("sub_max_chars") or (14 if W <= 1080 else 16))
+    cues: list[dict] = []
+    for s in (script.get("tts") or {}).get("sentences") or []:
+        chunks = _split_cues(str(s.get("text") or ""), max_chars)
+        if not chunks:
+            continue
+        st, en = float(s["start"]), float(s["end"])
+        span = max(0.3, en - st)
+        total_chars = sum(len(c) for c in chunks) or 1
+        t = st
+        for i, c in enumerate(chunks):
+            if i == len(chunks) - 1:
+                e = en
+            else:
+                e = min(en, max(t + 0.35, t + span * len(c) / total_chars))
+            cues.append({"start": round(t, 3), "end": round(e, 3), "text": c})
+            t = e
+    hook = None
+    if v.get("hook"):
+        txt = hook_text(project, script, cfg)
+        if txt:
+            dur = max(0.5, min(15.0, float(v.get("hook_dur") or 3.2)))
+            hook = {"start": 0.0, "end": round(dur, 3), "text": txt}
+    return {"hook": hook, "cues": cues, "max_chars": max_chars}
+
+
 def build_ass(project: dict, script: dict, cfg: dict) -> Path:
     v = cfg["video"]
     W, H = int(v["w"]), int(v["h"])
@@ -3069,6 +3113,7 @@ def build_ass(project: dict, script: dict, cfg: dict) -> Path:
     font = v.get("sub_font") or "Microsoft YaHei"
     mv = int(H * float(v.get("sub_margin") or 0.17))
     outline = float(v.get("sub_outline") or 3.0)
+    hsize = int(v.get("hook_size") or round(size * 1.1))
     out = project_dir(project["id"]) / ("sub_%d.ass" % int(script.get("idx", 0)))
     head = """[Script Info]
 ScriptType: v4.00+
@@ -3084,34 +3129,58 @@ Style: Hook,%s,%d,&H0000E1FF,&H000000FF,&H00141414,&HA0000000,-1,0,0,0,100,100,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
-""" % (W, H, font, size, outline, mv, font, int(size * 1.1), outline + 0.6, int(H * 0.10))
+""" % (W, H, font, size, outline, mv, font, hsize, outline + 0.6, int(H * 0.10))
+    plan = sub_plan(project, script, cfg)
     rows = []
-    # 字幕一行显示：按字数上限把长句拆成多条依次出现（不再用 \N 折行）
-    max_chars = int(v.get("sub_max_chars") or (14 if W <= 1080 else 16))
-    for s in (script.get("tts") or {}).get("sentences") or []:
-        cues = _split_cues(str(s.get("text") or ""), max_chars)
-        if not cues:
-            continue
-        st, en = float(s["start"]), float(s["end"])
-        span = max(0.3, en - st)
-        total_chars = sum(len(c) for c in cues) or 1
-        t = st
-        for i, c in enumerate(cues):
-            if i == len(cues) - 1:
-                e = en
-            else:
-                e = min(en, max(t + 0.35, t + span * len(c) / total_chars))
-            rows.append("Dialogue: 0,%s,%s,Sub,,0,0,0,,%s" % (_tc(t), _tc(e), _ass_escape(c)))
-            t = e
-    if v.get("hook"):
-        hook_txt = str(script.get("title") or "")
-        if not hook_txt:
-            pname = str((project.get("product") or {}).get("name") or "")
-            hook_txt = "｜".join(x for x in (pname, script.get("angle_label") or "") if x)
-        if hook_txt:
-            rows.insert(0, "Dialogue: 1,%s,%s,Hook,,0,0,0,,%s" % (
-                _tc(0), _tc(3.2), _wrap(hook_txt[:24], 13)))
+    if plan["hook"]:
+        hk = plan["hook"]
+        rows.append("Dialogue: 1,%s,%s,Hook,,0,0,0,,%s" % (
+            _tc(hk["start"]), _tc(hk["end"]), _wrap(hk["text"], 13)))
+    for c in plan["cues"]:
+        rows.append("Dialogue: 0,%s,%s,Sub,,0,0,0,,%s" % (
+            _tc(c["start"]), _tc(c["end"]), _ass_escape(c["text"])))
     out.write_text(head + "\n".join(rows) + "\n", encoding="utf-8")
+    return out
+
+
+def sub_preview(project: dict, script: dict, cfg: dict, at: float, width: int = 540) -> Path:
+    """出一张带字幕的预览帧，出片前就能看清字幕长什么样。
+
+    取帧位置在成片时间轴上找：哪条镜头盖住了 at，就从那条的对应位置截。
+    没有分镜（还没对齐）就退化成黑底预览。
+    """
+    pdir = project_dir(project["id"])
+    pdir.mkdir(parents=True, exist_ok=True)
+    c = json.loads(json.dumps(cfg))
+    c.setdefault("video", {})["subtitle"] = True      # 预览不受「不烧字幕」开关影响
+    ass = build_ass(project, script, c)
+    at = max(0.0, float(at))
+    clips = (script.get("plan") or {}).get("clips") or []
+    path, local, found, cum = "", 0.0, False, 0.0
+    for cl in clips:
+        d = float(cl.get("dur") or 0)
+        if at < cum + d + 1e-6:
+            path = str(cl.get("path") or "")
+            local = float(cl.get("ss") or 0) + max(0.0, at - cum)
+            found = True
+            break
+        cum += d
+    if not found and clips:
+        cl = clips[-1]
+        path = str(cl.get("path") or "")
+        local = float(cl.get("ss") or 0) + max(0.0, float(cl.get("dur") or 0) - 0.05)
+    W, H = int(c["video"]["w"]), int(c["video"]["h"])
+    out = pdir / ("sub_pv_%d_%04d.jpg" % (int(script.get("idx", 0)), int(at * 10)))
+    filt = "setpts=PTS+%.3f/TB,ass=%s,scale=%d:-2" % (at, ass.name, width)
+    if path and Path(path).is_file():
+        args = ["-v", "error", "-ss", "%.3f" % max(0.0, local), "-i", path,
+                "-vf", filt, "-frames:v", "1", "-q:v", "3", "-y", str(out)]
+    else:
+        args = ["-v", "error", "-f", "lavfi", "-i", "color=c=0x14120E:s=%dx%d:d=0.6" % (W, H),
+                "-vf", filt, "-frames:v", "1", "-q:v", "3", "-y", str(out)]
+    r = run(args, timeout=120, cwd=str(pdir))
+    if r.returncode != 0 or not out.exists():
+        raise RuntimeError("预览生成失败：%s" % _short(r.stderr or "", 200))
     return out
 
 
