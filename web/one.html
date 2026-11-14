@@ -481,15 +481,33 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
 
   <div class="card" id="outlist-card" hidden>
     <h2><span class="ch-no">05</span>成片列表 <span class="hint" id="ol-sum"></span><span class="hint" style="margin-left:8px">按生成时间排，新的在前</span></h2>
+    <div class="row" id="ol-tools" style="margin-top:4px">
+      <button class="g sm" id="btn-ol-all">全选</button>
+      <button class="g sm" id="btn-ol-none">全不选</button>
+      <span class="hintline" id="ol-cnt">已选 0 / 0 条</span>
+      <button class="b sm" id="btn-ol-dl">批量下载</button>
+      <button class="g sm" id="btn-ol-qc" title="查黑边、字幕超宽、静音段、音量、首尾黑场、码率">体检所选</button>
+      <button class="g sm" id="btn-ol-del">删除所选</button>
+      <button class="g sm" id="btn-ol-dir">打开文件夹</button>
+      <span class="hintline" id="ol-msg"></span>
+    </div>
     <div style="margin-top:10px;max-height:46vh;overflow:auto">
       <table class="shots ol">
         <thead><tr>
-          <th class="srt on">成片</th><th style="width:58px">时长</th><th style="width:66px">体积</th>
+          <th class="ck" style="width:32px"></th><th class="srt on">成片</th><th style="width:58px">时长</th><th style="width:66px">体积</th>
           <th style="width:78px">码率</th><th style="width:48px">镜头</th><th style="width:76px">体检</th>
           <th style="width:100px">生成时间</th><th style="width:124px"></th>
         </tr></thead>
         <tbody id="ol-body"></tbody>
       </table>
+    </div>
+    <div class="olfab" id="ol-fab">
+      <b id="olfab-n">已选 0 条</b>
+      <span class="sz" id="olfab-sz"></span>
+      <span class="sp"></span>
+      <button class="g sm" id="olfab-clear">取消选择</button>
+      <button class="b sm" id="olfab-dl">下载所选</button>
+      <button class="g sm" id="olfab-del">删除</button>
     </div>
   </div>
 </main>
@@ -1250,6 +1268,7 @@ async function showQc(name, mode){
   paintQc(r.qc);
 }
 let OUTS = [];
+let OUTSEL = new Set();
 let lastOutName = localStorage.getItem("one_out") || "";
 async function delOne(name, withMid, ask){
   if(ask){
@@ -1281,9 +1300,11 @@ async function renderOut(){
   const rec = await api("/api/pipe/outputs");
   const items = (rec.items || []).slice().sort((a,b)=>(Number(b.mtime)||0) - (Number(a.mtime)||0));
   OUTS = items;
+  OUTSEL = new Set([...OUTSEL].filter(n => items.some(x => x.name === n)));
   if(!items.length){
     $("#out-card").hidden = true;
     $("#outlist-card").hidden = true;
+    updateOlCnt();
     return;
   }
   const curName = (lastOutName && items.some(x=>x.name === lastOutName)) ? lastOutName : items[0].name;
@@ -1328,6 +1349,14 @@ function renderOutList(curName){
   OUTS.forEach(it=>{
     const tr = mk("tr");
     if(it.name === curName) tr.classList.add("cur");
+    if(OUTSEL.has(it.name)) tr.classList.add("sel");
+    const ck = mk("input"); ck.type = "checkbox"; ck.checked = OUTSEL.has(it.name);
+    ck.onchange = ()=>{
+      if(ck.checked) OUTSEL.add(it.name); else OUTSEL.delete(it.name);
+      tr.classList.toggle("sel", ck.checked);
+      updateOlCnt();
+    };
+    const td0 = mk("td","ck"); td0.appendChild(ck); tr.appendChild(td0);
     const nm = mk("div","nm", it.name.replace(/\.mp4$/i, ""));
     nm.title = "点一下在上面播放　" + it.name;
     nm.onclick = ()=> pickOut(it.name);
@@ -1358,7 +1387,96 @@ function renderOutList(curName){
     act.appendChild(box); tr.appendChild(act);
     body.appendChild(tr);
   });
+  updateOlCnt();
 }
+
+function updateOlCnt(){
+  const n = OUTSEL.size, all = OUTS.length;
+  $("#ol-cnt").textContent = "已选 " + n + " / " + all + " 条";
+  $("#btn-ol-dl").disabled = n === 0;
+  $("#btn-ol-del").disabled = n === 0;
+  $("#btn-ol-qc").disabled = n === 0;
+  const sz = OUTS.reduce((a,b)=> a + (OUTSEL.has(b.name) ? (b.size || 0) : 0), 0);
+  $("#olfab-n").textContent = "已选 " + n + " 条";
+  $("#olfab-sz").textContent = n ? ("共 " + fmtSize(sz)) : "";
+  const show = n > 0 && !$("#outlist-card").hidden;
+  $("#ol-fab").classList.toggle("on", show);
+}
+
+async function zipSel(btn, msgEl){
+  const names = [...OUTSEL];
+  if(!names.length){ toast("先在列表里勾选要下载的成片"); return false; }
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = "打包中…";
+  if(msgEl) msgEl.textContent = "正在打包 " + names.length + " 条…";
+  const r = await api("/api/pipe/output/zip", {names});
+  btn.disabled = false; btn.textContent = label;
+  if(r.error){
+    if(msgEl) msgEl.textContent = "";
+    toast("打包失败：" + r.error, 6500);
+    return false;
+  }
+  const a = mk("a"); a.href = r.url; a.download = r.name;
+  document.body.appendChild(a); a.click(); a.remove();
+  if(msgEl) msgEl.textContent = "已打包 " + r.count + " 条 · " + fmtSize(r.zip_size);
+  toast("开始下载：" + r.name);
+  return true;
+}
+
+async function delSel(btn, msgEl){
+  const names = [...OUTSEL];
+  if(!names.length){ toast("先在列表里勾选要删的成片"); return false; }
+  if(!confirm("删除选中的 " + names.length + " 条成片？\n\n每条会一起删掉它的分镜表、字幕、配音；原始素材视频不动。\n全部移到 Windows 回收站，可以还原。")) return false;
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = "删除中…";
+  let ok = 0, fail = 0;
+  for(let i=0;i<names.length;i++){
+    if(msgEl) msgEl.textContent = "删除中 " + (i+1) + "/" + names.length;
+    const it = OUTS.find(x=>x.name === names[i]);
+    if(await delOne(names[i], !!(it && it.shots_csv), false)) ok++; else fail++;
+    OUTSEL.delete(names[i]);
+  }
+  btn.disabled = false; btn.textContent = label;
+  if(msgEl) msgEl.textContent = "已删 " + ok + " 条" + (fail ? "，" + fail + " 条没删掉" : "");
+  toast(fail ? ("删完 " + ok + " 条，" + fail + " 条失败（可能被占用）") : ("已移入回收站 " + ok + " 条"), fail ? 6000 : 3000);
+  await renderOut();
+  return ok > 0;
+}
+
+async function qcSel(btn, msgEl){
+  const names = [...OUTSEL];
+  if(!names.length){ toast("先在列表里勾选要体检的成片"); return false; }
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = "体检中…";
+  let ok = 0, fail = 0;
+  for(let i=0;i<names.length;i++){
+    if(msgEl) msgEl.textContent = "体检 " + (i+1) + "/" + names.length;
+    const r = await api("/api/pipe/qc?name=" + encodeURIComponent(names[i]) + "&force=1");
+    if(r.error || !r.qc || r.qc.ok === false){ fail++; continue; }
+    ok++;
+    const it = OUTS.find(x=>x.name === names[i]);
+    if(it) it.qc = {score:r.qc.score, level:r.qc.level, warn:r.qc.warn, bad:r.qc.bad};
+  }
+  btn.disabled = false; btn.textContent = label;
+  if(msgEl) msgEl.textContent = "体检完成 " + ok + " 条" + (fail ? "，失败 " + fail : "");
+  renderOutList(lastOutName || "");
+  toast("体检完成：" + ok + " 条" + (fail ? "，失败 " + fail + " 条" : ""));
+  return true;
+}
+
+$("#btn-ol-all").onclick = ()=>{ OUTS.forEach(x=> OUTSEL.add(x.name)); renderOutList(lastOutName || ""); };
+$("#btn-ol-none").onclick = ()=>{ OUTSEL.clear(); renderOutList(lastOutName || ""); };
+$("#btn-ol-dir").onclick = ()=>{
+  const base = (OUTS[0] && OUTS[0].out) || "";
+  if(!base){ toast("还没有成片"); return; }
+  openFolder(base.replace(/[\\/][^\\/]+$/, ""));
+};
+$("#btn-ol-dl").onclick = ()=> zipSel($("#btn-ol-dl"), $("#ol-msg"));
+$("#btn-ol-del").onclick = ()=> delSel($("#btn-ol-del"), $("#ol-msg"));
+$("#btn-ol-qc").onclick = ()=> qcSel($("#btn-ol-qc"), $("#ol-msg"));
+$("#olfab-dl").onclick = ()=> zipSel($("#olfab-dl"), null);
+$("#olfab-del").onclick = ()=> delSel($("#olfab-del"), null);
+$("#olfab-clear").onclick = ()=>{ OUTSEL.clear(); renderOutList(lastOutName || ""); };
 
 /* ---------- 素材目录 ---------- */
 function oneLines(){ return ($("#one-folders").value || "").split("\n").map(s=>s.trim()).filter(Boolean); }
