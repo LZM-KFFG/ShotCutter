@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light">
-<title>ShotCutter · 短视频一站式工作站</title>
+<title>ShotCutter · 短片工坊</title>
 <style>
 :root{
   color-scheme:light;
@@ -20,138 +20,140 @@
 ::-webkit-scrollbar-thumb{background:#C9C6BF;border-radius:5px;border:2px solid #F5F2EB}
 ::-webkit-scrollbar-thumb:hover{background:#B0ACA1}
 ::-webkit-scrollbar-track{background:transparent}
-::selection{background:rgba(193,59,27,.30)}
+::selection{background:#C13B1B;color:#F5F2EB}
 html,body{margin:0;padding:0}
-body{background:var(--bg);color:var(--ink);font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;-webkit-font-smoothing:antialiased}
+body{background:var(--bg);color:var(--ink);font:14px/1.75 "Microsoft YaHei",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
 a{color:inherit;text-decoration:none}
-header{position:sticky;top:0;z-index:30;background:rgba(245,242,235,.88);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
-.hw{max-width:1360px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
-.brand{display:flex;flex-direction:column;gap:1px}
-.brand h1{font-size:15px;margin:0;font-weight:650;letter-spacing:.2px}
-.brand p{margin:0;font-size:11.5px;color:var(--muted)}
-.sp{flex:1}
-.nav{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-.nav .ng{font-size:10px;color:var(--dim);letter-spacing:1px;margin:0 3px 0 6px;user-select:none}
-.nav .ng:first-child{margin-left:0}
-.nav a{font-size:12.5px;padding:5px 13px;border-radius:999px;border:1px solid var(--line);background:#EDE9DE;color:var(--muted);cursor:pointer;transition:.14s}
-.nav a:hover{color:var(--ink);border-color:var(--line-2);background:#E4DFD1}
-.nav a.on{background:var(--ink);color:#F5F2EB;border-color:var(--ink);font-weight:600}
-.chip{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:3px 10px;border-radius:999px;background:#E6E1D4;color:var(--muted);border:1px solid var(--line)}
+.wrap{max-width:1120px;margin:0 auto;padding:48px 40px 64px}
+
+/* ---- 刊头 ---- */
+.masthead{display:flex;justify-content:space-between;align-items:flex-end;gap:20px;
+  padding-bottom:18px;border-bottom:2px solid var(--ink);flex-wrap:wrap}
+.wordmark{font-family:var(--display);font-size:24px;font-weight:700;letter-spacing:.03em}
+.wordmark i{font-style:normal;color:var(--accent)}
+.wordmark small{font-family:var(--mono);font-size:10.5px;font-weight:400;color:var(--muted);
+  margin-left:12px;letter-spacing:.2em}
+.mast-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:11px;letter-spacing:.04em;
+  padding:3px 11px;border:1px solid var(--line-2);border-radius:0;color:var(--muted);background:transparent}
 .chip .dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.45}
-.chip.on{background:var(--accent-2);color:#C13B1B;border-color:#CE8465}
+.chip.on{border-color:var(--accent);color:var(--accent)}
 .chip.on .dot{background:var(--ok);opacity:1}
 .chip.off .dot{background:#A5A196;opacity:1}
-main{max-width:1360px;margin:0 auto;padding:34px 20px 80px}
-.hero{margin-bottom:36px}
-.hero h2{font-size:26px;font-weight:650;letter-spacing:-.01em;margin:0 0 8px}
-.hero h2 em{font-style:normal;color:var(--accent)}
-.hero p{margin:0;color:var(--muted);font-size:13.5px;max-width:620px}
-.sec{margin-bottom:34px}
-.sechead{display:flex;align-items:center;gap:12px;margin-bottom:14px}
-.sechead b{font-size:13px;font-weight:650;letter-spacing:.5px}
-.sechead span{font:10.5px var(--mono);color:var(--dim);letter-spacing:1.5px;text-transform:uppercase}
-.sechead i{flex:1;height:1px;background:var(--line);font-style:normal}
-.sechead .cnt{font:11px var(--mono);color:var(--dim)}
-.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
-.card{display:block;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px 16px;transition:.16s;position:relative}
-.card:hover{border-color:#CE8465;background:#E4DFD1;transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.35)}
-.card .go{position:absolute;top:16px;right:16px;color:var(--dim);font-size:15px;transition:.16s}
-.card:hover .go{color:var(--accent);transform:translateX(3px)}
-.card h3{margin:0 0 6px;font-size:15.5px;font-weight:650;letter-spacing:.2px}
-.card .desc{font-size:12.5px;color:var(--muted);line-height:1.6;min-height:40px}
-.card .meta{margin-top:12px;padding-top:10px;border-top:1px solid var(--line);display:flex;gap:6px;flex-wrap:wrap}
-.card .meta i{font:10.5px var(--mono);font-style:normal;color:var(--dim);background:#E6E1D4;border:1px solid var(--line);border-radius:5px;padding:1px 7px}
-.foot{margin-top:44px;padding-top:16px;border-top:1px solid var(--line);display:flex;gap:14px;align-items:center;flex-wrap:wrap}
-.foot span{font-size:11.5px;color:var(--dim)}
-.foot .path{font:11px var(--mono)}
 
-/* ---- editorial P1 layer ---- */
-h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
-::selection{background:#C13B1B;color:#F5F2EB}
+/* ---- 封面主区 ---- */
+.hero{padding:64px 0 44px;position:relative}
+.kicker{font-size:11px;letter-spacing:.35em;color:var(--dim)}
+.kicker b{color:var(--accent);font-weight:400}
+.hero h1{font-family:var(--display);font-size:clamp(40px,6vw,74px);font-weight:600;
+  line-height:1.16;margin:18px 0 0;letter-spacing:.01em}
+.hero h1 em{font-style:normal;color:var(--accent)}
+.hero .lede{margin:22px 0 0;font-size:14.5px;color:var(--muted);max-width:36em}
+.hero .lede b{color:var(--ink);font-weight:600}
+.stamp{position:absolute;right:2%;top:58px;transform:rotate(6deg);border:1.5px solid var(--accent);
+  color:var(--accent);font-family:var(--mono);font-size:10.5px;letter-spacing:.26em;
+  padding:8px 12px 7px 15px;line-height:2;user-select:none}
+@media (max-width:760px){.stamp{display:none}}
+
+/* ---- 目次 ---- */
+.toc{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid var(--line-2)}
+.cat{padding:26px 0 8px}
+.cat:first-child{border-right:1px solid var(--line);padding-right:36px}
+.cat:last-child{padding-left:36px}
+.cat-k{font-size:10.5px;letter-spacing:.32em;color:var(--dim);margin-bottom:14px}
+.cat-k b{color:var(--accent);font-weight:400}
+.toc-row{display:flex;align-items:baseline;gap:16px;padding:15px 10px 14px;margin:0 -10px;
+  border-top:1px solid var(--line);cursor:pointer;transition:background .14s}
+.toc-row:hover{background:var(--panel)}
+.toc-row .no{font-family:var(--mono);font-size:13px;color:var(--accent);min-width:26px}
+.toc-row .body{min-width:0}
+.toc-row .t{font-family:var(--display);font-size:20px;font-weight:600;line-height:1.4}
+.toc-row .d{font-size:12px;color:var(--muted);line-height:1.7;margin-top:2px}
+.toc-row .ar{margin-left:auto;color:var(--dim);font-family:var(--mono);transition:.14s;align-self:center}
+.toc-row:hover .ar{color:var(--accent);transform:translateX(3px)}
+.star{font-size:10px;color:var(--accent);border:1px solid var(--accent);padding:2px 8px;
+  letter-spacing:.18em;margin-left:10px;vertical-align:3px}
+.ext{opacity:.8}
+.ext .no{color:var(--dim)}
+.ext .t{font-size:16px}
+
+/* ---- 页脚 ---- */
+.folio{margin-top:40px;padding-top:14px;border-top:1px solid var(--line-2);
+  display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;
+  font-family:var(--mono);font-size:10.5px;color:var(--dim);letter-spacing:.08em}
+@media (max-width:860px){
+  .toc{grid-template-columns:1fr}
+  .cat:first-child{border-right:none;padding-right:0;border-bottom:1px solid var(--line);padding-bottom:20px}
+  .cat:last-child{padding-left:0;padding-top:20px}
+  .wrap{padding:32px 22px 48px}
+}
 </style>
 </head>
 <body>
-<header>
-  <div class="hw">
-    <div class="brand">
-      <h1>ShotCutter</h1>
-      <p>短视频一站式工作站 · 全部在本机运行</p>
-    </div>
-    <div class="sp"></div>
-    <nav class="nav">
-      <span class="ng">工具</span>
-      <a href="/cutter">镜头切割器</a>
-      <a href="/sub">字幕去除</a>
-      <a href="/hd">视频变高清</a>
-      <span class="ng">生成</span>
-      <a href="/one">一键出片</a>
-      <a href="/pipeline">流水线</a>
-    </nav>
-    <span class="chip" id="chip-eng" title="处理引擎"><i class="dot"></i><span>引擎…</span></span>
-    <span class="chip" id="chip-llm" title="大模型状态">模型…</span>
-  </div>
-</header>
+<div class="wrap">
 
-<main>
+  <div class="masthead">
+    <div class="wordmark">SHOTCUTTER<i>.</i><small>短片工坊</small></div>
+    <div class="mast-meta">
+      <span class="chip" id="chip-eng" title="处理引擎"><i class="dot"></i><span>引擎…</span></span>
+      <span class="chip" id="chip-llm" title="大模型状态">模型…</span>
+    </div>
+  </div>
+
   <div class="hero">
-    <h2>素材进，<em>成片</em>出。</h2>
-    <p>左边先把素材收拾干净——切镜头、擦字幕、提清晰度；右边再把干净素材做成能发的成片。全程本地，不上传一个字节。</p>
+    <div class="stamp">本地运行<br>无需上传</div>
+    <p class="kicker">短视频出片工具箱 · <b>目 次</b></p>
+    <h1>今天想<em>做</em>什么？</h1>
+    <p class="lede">五个入口，两条路：先<b>修素材</b>——切镜头、擦字幕、提清晰度；或直接<b>创作</b>——
+    一键出片、流水线精调。全程本机，不上传一个字节。</p>
   </div>
 
-  <section class="sec">
-    <div class="sechead">
-      <b>工具</b><span>Tools</span><i></i>
-      <span class="cnt">处理现成素材 · 单文件进出</span>
-    </div>
-    <div class="cards">
-      <a class="card" href="/cutter">
-        <span class="go">→</span>
-        <h3>镜头切割器</h3>
-        <div class="desc">自动检测镜头边界，按刀无损切出片段，批量导出选中镜头，还能给素材去重。</div>
-        <div class="meta"><i>PySceneDetect</i><i>ffmpeg 无损</i><i>画面指纹去重</i></div>
+  <div class="toc">
+    <div class="cat">
+      <p class="cat-k">栏目一 · <b>工 具</b>（先修素材）</p>
+      <a class="toc-row" href="/cutter">
+        <span class="no">01</span>
+        <span class="body"><span class="t">镜头切割器</span><br><span class="d">自动检测镜头边界，按刀无损切分，批量导出选中镜头，画面指纹去重</span></span>
+        <span class="ar">→</span>
       </a>
-      <a class="card" href="/sub">
-        <span class="go">→</span>
-        <h3>字幕去除</h3>
-        <div class="desc">AI 找到画面里烧死的硬字幕并擦除还原背景。框选字幕区域，或全帧自动检测。</div>
-        <div class="meta"><i>VSR</i><i>GPU</i><i>输出在原目录</i></div>
+      <a class="toc-row" href="/sub">
+        <span class="no">02</span>
+        <span class="body"><span class="t">字幕去除</span><br><span class="d">AI 找到烧死的硬字幕并擦除还原，框选区域或全帧自动，输出在原目录</span></span>
+        <span class="ar">→</span>
       </a>
-      <a class="card" href="/hd">
-        <span class="go">→</span>
-        <h3>视频变高清</h3>
-        <div class="desc">AI 超分辨率放大 + RIFE 补帧，720p 直上 4K。三种引擎按素材类型选。</div>
-        <div class="meta"><i>video2x</i><i>Real-ESRGAN</i><i>RIFE 补帧</i></div>
+      <a class="toc-row" href="/hd">
+        <span class="no">03</span>
+        <span class="body"><span class="t">视频变高清</span><br><span class="d">AI 超分辨率放大 + RIFE 补帧，720p 直上 4K，三种引擎按素材选</span></span>
+        <span class="ar">→</span>
       </a>
     </div>
-  </section>
-
-  <section class="sec">
-    <div class="sechead">
-      <b>视频生成</b><span>Generate</span><i></i>
-      <span class="cnt">从素材到成片 · 配好字幕配音 BGM</span>
-    </div>
-    <div class="cards">
-      <a class="card" href="/one">
-        <span class="go">→</span>
-        <h3>一键出片</h3>
-        <div class="desc">丢一堆素材直接出方案，挑一版就渲染：挑句、字幕、配音、BGM 全自动配好。</div>
-        <div class="meta"><i>丢素材即用</i><i>多方案</i><i>在线曲库</i></div>
+    <div class="cat">
+      <p class="cat-k">栏目二 · <b>生 成</b>（直接创作）</p>
+      <a class="toc-row" href="/one">
+        <span class="no">04</span>
+        <span class="body"><span class="t">一键出片</span><span class="star">推荐</span><br><span class="d">丢一堆素材直接出方案，挑一版就渲染：挑句、字幕、配音、BGM 全配好</span></span>
+        <span class="ar">→</span>
       </a>
-      <a class="card" href="/pipeline">
-        <span class="go">→</span>
-        <h3>成片流水线</h3>
-        <div class="desc">全流程手动可控：分镜表逐句编辑、字幕改稿、TTS 配音、BGM 混音、多版本渲染。</div>
-        <div class="meta"><i>分镜表</i><i>TTS</i><i>混音试听</i></div>
+      <a class="toc-row" href="/pipeline">
+        <span class="no">05</span>
+        <span class="body"><span class="t">成片流水线</span><br><span class="d">全流程手动可控：分镜表逐句编辑、TTS 配音、BGM 混音、多版本渲染</span></span>
+        <span class="ar">→</span>
+      </a>
+      <a class="toc-row ext" href="/one#bgm">
+        <span class="no">＋</span>
+        <span class="body"><span class="t">在线曲库</span><br><span class="d">Incompetech 免费商用 BGM，搜得到就能用（在一键出片页内）</span></span>
+        <span class="ar">→</span>
       </a>
     </div>
-  </section>
-
-  <div class="foot">
-    <span>数据目录</span><span class="path" id="work-dir">…</span>
-    <span>·</span>
-    <span>处理引擎与模型状态见右上角，全部就绪后即可开工</span>
   </div>
-</main>
+
+  <div class="folio">
+    <span>SHOTCUTTER · 目次页</span>
+    <span id="work-dir">…</span>
+    <span>ffmpeg · PySceneDetect · VSR · video2x</span>
+  </div>
+
+</div>
 
 <script>
 const $ = s => document.querySelector(s);

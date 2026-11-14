@@ -36,9 +36,11 @@ header{position:sticky;top:0;z-index:30;background:rgba(245,242,235,.88);backdro
 .nav a{font-size:12.5px;padding:5px 13px;border-radius:999px;border:1px solid var(--line);background:#EDE9DE;color:var(--muted);cursor:pointer;transition:.14s}
 .nav a:hover{color:var(--ink);border-color:var(--line-2);background:#E4DFD1}
 .nav a.on{background:var(--ink);color:#F5F2EB;border-color:var(--ink);font-weight:600}
-main{max-width:980px;margin:0 auto;padding:22px 20px 140px}
-.pagehead{margin-bottom:18px}
-.pagehead h2{margin:0 0 4px;font-size:20px;font-weight:650}
+main{max-width:1240px;margin:0 auto;padding:26px 24px 150px}
+.pagehead{margin-bottom:20px}
+.pagehead .kicker{font-size:10.5px;letter-spacing:.32em;color:var(--dim);margin:0 0 8px}
+.pagehead .kicker b{color:var(--accent);font-weight:400}
+.pagehead h2{margin:0 0 6px;font-size:31px;font-weight:600}
 .pagehead p{margin:0;font-size:12.5px;color:var(--muted)}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:14px}
 .card h3{font-size:12.5px;margin:0 0 12px;font-weight:650;color:var(--muted);letter-spacing:.4px}
@@ -84,7 +86,7 @@ input[type=number]{width:90px;font:12.5px var(--mono);padding:7px 9px;border:1px
 .result .rn b{color:#C13B1B}
 .result .sp{flex:1}
 footer{position:fixed;bottom:0;left:0;right:0;z-index:30;background:rgba(245,242,235,.94);backdrop-filter:blur(10px);border-top:1px solid var(--line)}
-.fw{max-width:980px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.fw{max-width:1240px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .msg{font-size:12px;color:var(--muted)}
 .msg.err{color:var(--bad)}
 .msg.ok{color:var(--ok)}
@@ -100,7 +102,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
   <div class="hw">
     <div class="brand">
       <h1>视频变高清</h1>
-      <p>AI 超分放大 + RIFE 补帧 · 全部在本机 GPU 上跑</p>
+      <p><b style="color:var(--accent);font-family:var(--mono);font-size:10px;letter-spacing:.26em">TOOL · 03&nbsp;&nbsp;</b>AI 超分放大 + RIFE 补帧 · 全部在本机 GPU 上跑</p>
     </div>
     <div class="sp"></div>
     <nav class="nav">
@@ -117,6 +119,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
 
 <main>
   <div class="pagehead">
+    <p class="kicker">TOOL · <b>03</b> · video2x + RTX GPU</p>
     <h2>视频变高清</h2>
     <p>720p 选 3x 正好 4K，1080p 选 2x。先拿 15 秒样片试，别一上来跑整片。</p>
   </div>
