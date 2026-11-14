@@ -176,11 +176,13 @@ def asr_ready() -> tuple[bool, str]:
     try:
         import faster_whisper  # noqa: F401
         return True, ""
-    except Exception:  # noqa: BLE001
-        return False, ("没装转写引擎。装一条就行：\n"
+    except Exception as e:  # noqa: BLE001
+        detail = str(e) or e.__class__.__name__
+        return False, ("转写引擎加载失败：%s\n"
+                       "如果确实是没装，装一条就行：\n"
                        ".venv\\Scripts\\pip install faster-whisper\n"
                        "（首次运行会自动下模型，small 约 250MB；要更准可以设 "
-                       'director.json 里 asr_model 为 "medium"）')
+                       'director.json 里 asr_model 为 "medium"）' % detail)
 
 
 def _asr_cfg(cfg: dict) -> dict:
