@@ -83,6 +83,19 @@ python -m venv .venv
 新电脑上只要：**装个 Python 3.12/3.13 → 双击 `安装.bat`（2~4 分钟，全程离线）→ 双击 `启动.bat`**。
 以后再换机器，整个文件夹拷过去、删掉 `.venv`、重新跑一次 `安装.bat` 即可。
 
+**连 Python 都不想装？用免安装版**（自带 Python 运行时，约 2.6GB）：
+
+```bat
+.venv\Scripts\python.exe pack.py --only-embed        :: 生成 dist\ShotCutter-免安装
+.venv\Scripts\python.exe pack.py --only-embed --zip  :: 顺便压成 zip（约 1.2GB）
+```
+
+拷到新电脑 → 双击 `启动.bat` → 浏览器自动打开，**不需要装 Python、不需要联网**。
+`serve.bat` 可以让它后台常驻，关掉黑窗口也不停。
+
+> 免安装版用的是嵌入式 Python（隔离模式），包根目录靠 `python313._pth` 里的 `..` 暴露给解释器；
+> 打包脚本已处理，手改会坏。
+
 两个可选工具不随包附带，需要时单独放：
 
 | 工具 | 放法 |

@@ -23,6 +23,7 @@ import random
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -31,6 +32,39 @@ import pipeline as pipe
 
 ASR_DIR = pipe.PIPE / "asr"
 VOICE_NAME = "voice_direct.wav"
+
+
+def _add_cuda_dll_dirs() -> None:
+    """把 pip 装的 nvidia-* 包里的 DLL 目录加进 PATH。
+
+    Windows 上 ctranslate2 是靠名字去 PATH 里找 cublas64_12.dll / cudnn64_9.dll 的，
+    `pip install nvidia-cublas-cu12 nvidia-cudnn-cu12` 把 DLL 放在
+    site-packages/nvidia/*/bin，默认不在 PATH，于是 GPU 转写会报
+    「Library cublas64_12.dll is not found」。加进来就能用显卡跑。
+    """
+    try:
+        import site
+        bases: list[Path] = []
+        try:
+            for sp in list(site.getsitepackages()) + [site.getusersitepackages()]:
+                bases.append(Path(sp))
+        except Exception:  # noqa: BLE001
+            pass
+        # 免安装包用的是 --target 布局，site-packages 就在 sys.path 里，扫一遍更稳
+        bases += [Path(p) for p in sys.path if p]
+        dirs = []
+        for base in bases:
+            for sub in ("cublas", "cudnn"):
+                d = base / "nvidia" / sub / "bin"
+                if d.is_dir() and str(d) not in dirs:
+                    dirs.append(str(d))
+        if dirs:
+            os.environ["PATH"] = os.pathsep.join(dirs + [os.environ.get("PATH", "")])
+    except Exception:  # noqa: BLE001
+        pass
+
+
+_add_cuda_dll_dirs()
 
 
 def _ensure_ffmpeg() -> None:
@@ -309,20 +343,36 @@ def transcribe_file(path: str, cfg: dict, job: dict | None = None,
     audio = _load_audio_16k(path)
     if job:
         job["message"] = "转写：%s" % Path(path).name
-    segments, _info = model.transcribe(
-        audio,
-        language=str(d.get("asr_lang") or "zh"),
-        vad_filter=bool(d.get("asr_vad", True)),
-        vad_parameters={"min_silence_duration_ms": int(d.get("asr_min_silence_ms") or 300)},
-        beam_size=int(d.get("asr_beam") or 5),
-        initial_prompt=str(d.get("asr_prompt") or ""),
-    )
-    out = []
-    for s in segments:
-        txt = (s.text or "").strip()
-        if len(re.sub(r"[^\w\u4e00-\u9fff]", "", txt)) < 2:
-            continue
-        out.append({"text": txt, "start": round(float(s.start), 3), "end": round(float(s.end), 3)})
+
+    def _run(m) -> list[dict]:
+        segments, _info = m.transcribe(
+            audio,
+            language=str(d.get("asr_lang") or "zh"),
+            vad_filter=bool(d.get("asr_vad", True)),
+            vad_parameters={"min_silence_duration_ms": int(d.get("asr_min_silence_ms") or 300)},
+            beam_size=int(d.get("asr_beam") or 5),
+            initial_prompt=str(d.get("asr_prompt") or ""),
+        )
+        rows = []
+        for s in segments:
+            txt = (s.text or "").strip()
+            if len(re.sub(r"[^\w\u4e00-\u9fff]", "", txt)) < 2:
+                continue
+            rows.append({"text": txt, "start": round(float(s.start), 3),
+                         "end": round(float(s.end), 3)})
+        return rows
+
+    try:
+        out = _run(model)
+    except RuntimeError as exc:
+        # 显卡环境缺 DLL / 驱动不对时别让整条流程挂掉，退回 CPU 继续跑
+        if device != "cpu" and re.search(r"cublas|cudnn|cuda|not found", str(exc), re.I):
+            if job:
+                job["message"] = "显卡不可用（%s），改用 CPU 转写…" % str(exc)[:60]
+            model = _model(model_name, "cpu", "int8")
+            out = _run(model)
+        else:
+            raise
     out = clean_sentences(out)
     out = _drop_prompt_echo(out, str(d.get("asr_prompt") or ""))
     try:

@@ -196,6 +196,154 @@ if __name__ == "__main__":
     sys.exit(main())
 '''
 
+EMBED_VER = "3.13.14"
+EMBED_URL = "https://www.python.org/ftp/python/%s/python-%s-embed-amd64.zip" % (EMBED_VER, EMBED_VER)
+EMBED_OUT = HERE / "dist" / "ShotCutter-免安装"
+
+EMBED_START = r'''@echo off
+chcp 65001 >nul
+cd /d "%~dp0"
+if not exist "python\python.exe" (
+  echo 运行时文件缺失：python\python.exe
+  pause
+  exit /b 1
+)
+echo 启动中，浏览器会自动打开（关闭本窗口即停止服务）
+python\python.exe app.py %*
+pause
+'''
+
+EMBED_README = r'''ShotCutter 免安装版（自带 Python 运行时）
+========================================
+
+双击「启动.bat」就能用，不需要安装 Python、不需要联网装依赖。
+
+  浏览器地址：http://127.0.0.1:8777
+  停止服务：关掉那个黑窗口（或用 serve.bat 让它后台常驻）
+
+目录说明
+  python\        自带的 Python 运行时和全部依赖（别删）
+  tools\ffmpeg.exe
+  web\           页面
+  _work\         素材池、项目、成片、缓存（要备份就备这个目录）
+  pipeline.json  配置（模型、画幅、字幕、BGM 目录）
+
+常见问题
+1) 提示 8777 被占用：程序会自动往后找端口，看窗口里打印的地址
+2) 想换电脑：整个文件夹拷过去即可，无需重新安装
+3) 显卡转写：有 N 卡自动用显卡（首次转写会下 500MB 模型，走 hf-mirror）；
+   没 N 卡把 pipeline.json 里 director.asr_device 改成 "cpu"
+4) 可选工具（不装不影响其它功能）：
+   视频变高清 → 解压到 tools\VideoUpscaler，或改 pipeline.json 的 upscale.root
+   字幕去除   → 解压到任意位置，改 pipeline.json 的 desub.root
+'''
+
+
+def _download(url: str, dst: Path) -> None:
+    import urllib.request  # noqa: PLC0415
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    if dst.exists():
+        print("  已有缓存：%s" % dst.name)
+        return
+    print("  下载 %s …" % dst.name)
+    # urllib 会读系统代理；python.org 在国内一般直连就够
+    urllib.request.urlretrieve(url, dst)
+
+
+def build_embed(refresh_wheels: bool, zip_it: bool = False) -> int:
+    """免安装版：python 运行时 + site-packages 全部塞进包内，双击即用。"""
+    import zipfile  # noqa: PLC0415
+
+    cache = HERE / "dist" / "_cache"
+    zip_path = cache / ("python-%s-embed-amd64.zip" % EMBED_VER)
+    _download(EMBED_URL, zip_path)
+
+    if EMBED_OUT.exists():
+        print("清空旧的免安装包…")
+        shutil.rmtree(EMBED_OUT)
+    EMBED_OUT.mkdir(parents=True)
+
+    print("解压运行时…")
+    with zipfile.ZipFile(zip_path) as z:
+        z.extractall(EMBED_OUT / "python")
+
+    # 打开 site（否则装进 Lib\site-packages 的包不会被 import）
+    # ".." 是包根目录：嵌入式 Python 是隔离模式，不会自动把脚本所在目录加进 sys.path
+    pth = next((EMBED_OUT / "python").glob("python*._pth"))
+    lines = [ln for ln in pth.read_text(encoding="utf-8").splitlines()
+             if ln.strip() and not ln.strip().startswith("#")]
+    for need in ("Lib\\site-packages", ".."):
+        if need not in lines:
+            lines.append(need)
+    lines = [ln for ln in lines if ln.strip() != "import site"] + ["import site"]
+    pth.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print("  运行时 OK（%s）" % pth.name)
+
+    site_pkgs = EMBED_OUT / "python" / "Lib" / "site-packages"
+    site_pkgs.mkdir(parents=True, exist_ok=True)
+
+    wheels = HERE / "dist" / "ShotCutter-portable" / "wheels"
+    if refresh_wheels or not wheels.is_dir():
+        print("先准备离线 wheel（复用便携包目录）…")
+        tmp = HERE / "dist" / "_wheels_tmp"
+        if tmp.exists():
+            shutil.rmtree(tmp)
+        tmp.mkdir(parents=True)
+        cmd = [str(PY), "-m", "pip", "download", "-r", str(HERE / "requirements.txt"),
+               "-d", str(tmp), "--only-binary=:all:", "--disable-pip-version-check"]
+        if subprocess.call(cmd) != 0:
+            raise SystemExit("wheel 下载失败")
+        wheels = tmp
+
+    print("把依赖装进运行时（离线，2~4 分钟）…")
+    cmd = [str(PY), "-m", "pip", "install", "--no-index", "--find-links", str(wheels),
+           "--target", str(site_pkgs), "-r", str(HERE / "requirements.txt"),
+           "--disable-pip-version-check", "--no-compile"]
+    if subprocess.call(cmd) != 0:
+        raise SystemExit("依赖安装失败")
+
+    print("拷贝代码…")
+    for name in CODE_FILES:
+        if name in ("start.bat", "serve.bat"):    # 免安装版用自己的启动脚本
+            continue
+        src = HERE / name
+        if src.exists():
+            copy_item(src, EMBED_OUT / name)
+    for name in CODE_DIRS:
+        src = HERE / name
+        if src.exists():
+            copy_item(src, EMBED_OUT / name)
+
+    cfg = json.loads(json.dumps(_base_cfg()))
+    (EMBED_OUT / "pipeline.json").write_text(
+        json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    ff = HERE / ".venv" / "Scripts" / "ffmpeg.exe"
+    if not ff.exists():
+        raise SystemExit("本机没有 ffmpeg.exe")
+    copy_item(ff, EMBED_OUT / "tools" / "ffmpeg.exe")
+    copy_item(ff, EMBED_OUT / "python" / "ffmpeg.exe")   # 双保险：运行时目录也放一份
+
+    (EMBED_OUT / "启动.bat").write_text(EMBED_START, encoding="utf-8")
+    (EMBED_OUT / "serve.bat").write_text(
+        '@echo off\r\nchcp 65001 >nul\r\ncd /d "%~dp0"\r\n'
+        'python\\python.exe launch.py\r\n', encoding="utf-8")
+    (EMBED_OUT / "使用说明.txt").write_text(EMBED_README, encoding="utf-8")
+
+    for d in ("_work/pipe", "_work/asr", "_work/exports"):
+        (EMBED_OUT / d).mkdir(parents=True, exist_ok=True)
+
+    size = sum(f.stat().st_size for f in EMBED_OUT.rglob("*") if f.is_file())
+    print("\n免安装包：%s（%.0f MB）" % (EMBED_OUT, size / 1048576))
+    print("拷到新电脑 → 双击「启动.bat」→ 完成，不需要装任何东西")
+    if zip_it:
+        z = HERE / "dist" / "ShotCutter-免安装.zip"
+        zip_dir(EMBED_OUT, z)
+        print("zip：%s（%.0f MB）" % (z, z.stat().st_size / 1048576))
+    return 0
+
+
 
 def copy_item(src: Path, dst: Path) -> None:
     if src.is_dir():
@@ -205,11 +353,12 @@ def copy_item(src: Path, dst: Path) -> None:
         shutil.copy2(src, dst)
 
 
-def write_base_config(dst: Path) -> None:
-    """用代码里的默认配置生成一份干净的 pipeline.json（不带本机路径）。"""
+def _base_cfg() -> dict:
+    """干净配置：不带本机路径，GPU 默认开、缺卡自动回落。"""
     sys.path.insert(0, str(HERE))
-    import pipeline as pipe  # noqa: PLC0415
+    import importlib  # noqa: PLC0415
 
+    pipe = importlib.import_module("pipeline")
     cfg = json.loads(json.dumps(pipe.DEFAULT_CFG))
     d = cfg.setdefault("director", {})
     d.update({"asr_device": "cuda", "asr_compute": "float16",
@@ -218,8 +367,12 @@ def write_base_config(dst: Path) -> None:
     cfg.setdefault("upscale", {})["root"] = ""
     cfg.setdefault("video", {})["bgm_dirs"] = []
     cfg["video"]["delogo"] = ""
+    return cfg
+
+
+def write_base_config(dst: Path) -> None:
     (dst / "pipeline.json").write_text(
-        json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+        json.dumps(_base_cfg(), ensure_ascii=False, indent=2), encoding="utf-8")
     print("  配置模板 OK")
 
 
@@ -252,10 +405,16 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--zip", action="store_true", help="打包成 zip")
     ap.add_argument("--refresh", action="store_true", help="重新下载 wheel")
+    ap.add_argument("--embed", action="store_true",
+                    help="额外生成免安装版（自带 Python 运行时，双击即用）")
+    ap.add_argument("--only-embed", action="store_true", help="只生成免安装版")
     args = ap.parse_args()
 
     if not PY.exists():
         raise SystemExit("先在本机把 .venv 修好（找不到 %s）" % PY)
+
+    if args.only_embed:
+        return build_embed(args.refresh, args.zip)
 
     if OUT.exists():
         print("清空旧的 dist…")
@@ -299,6 +458,9 @@ def main() -> int:
         z = HERE / "dist" / "ShotCutter-portable.zip"
         zip_dir(OUT, z)
         print("zip：%s（%.0f MB）" % (z, z.stat().st_size / 1048576))
+    if args.embed:
+        print("")
+        build_embed(args.refresh, args.zip)
     return 0
 
 

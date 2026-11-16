@@ -51,7 +51,10 @@ MIME = {
 
 
 def find_ffmpeg() -> str | None:
-    cands = [ROOT / ".venv" / "Scripts" / "ffmpeg.exe", ROOT / ".venv" / "Scripts" / "ffmpeg"]
+    cands = [ROOT / ".venv" / "Scripts" / "ffmpeg.exe", ROOT / ".venv" / "Scripts" / "ffmpeg",
+             # 免安装包：ffmpeg 放在 tools/ 或跟 python 运行时放一起
+             ROOT / "tools" / "ffmpeg.exe", ROOT / "python" / "ffmpeg.exe",
+             ROOT / "ffmpeg.exe"]
     which = shutil.which("ffmpeg")
     if which:
         cands.append(Path(which))
