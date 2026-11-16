@@ -107,15 +107,41 @@ def spawn(py: Path, port: int) -> subprocess.Popen:
     raise SystemExit("无法启动服务")
 
 
+def _alive(pid: int) -> bool:
+    """这个 pid 还活着吗（Windows 上 tasklist，其它平台用信号 0 探测）。"""
+    if pid <= 4:
+        return False
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+    try:
+        out = subprocess.run(["tasklist", "/FI", "PID eq %d" % pid], capture_output=True,
+                             text=True, errors="replace", timeout=8).stdout
+        return str(pid) in out
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def stop_service() -> bool:
-    """先按 pid 文件停，再兜底按端口找。"""
+    """停掉本包拉起的服务。
+
+    优先用 pid 文件精确定位；只有拿不到 pid 时才按端口兜底，而且**只认目标端口**
+    （以前会把 8777~8797 上一整段端口的所有实例都杀掉，同机跑多个副本时会误杀别人的服务）。
+    """
     pids: list[int] = []
     try:
         if PID_FILE.exists():
-            pids.append(int(PID_FILE.read_text(encoding="utf-8").strip()))
+            pid = int(PID_FILE.read_text(encoding="utf-8").strip())
+            if _alive(pid):
+                pids.append(pid)
     except Exception:  # noqa: BLE001
         pass
-    if os.name == "nt":
+    if not pids and os.name == "nt":
+        env_port = (os.environ.get("SHOTCUTTER_PORT") or "").strip()
+        target = int(env_port) if env_port.isdigit() else DEFAULT_PORT
         try:
             out = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True,
                                  text=True, errors="replace", timeout=10).stdout
@@ -130,7 +156,7 @@ def stop_service() -> bool:
                     port = int(local.rsplit(":", 1)[-1])
                 except ValueError:
                     continue
-                if DEFAULT_PORT <= port <= DEFAULT_PORT + 20 and pid.isdigit():
+                if port == target and pid.isdigit():
                     pids.append(int(pid))
         except Exception:  # noqa: BLE001
             pass
