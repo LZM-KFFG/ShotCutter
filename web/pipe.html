@@ -306,6 +306,25 @@ body.has-fab main{padding-bottom:76px}
 /* ---- editorial P1 layer ---- */
 h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
 ::selection{background:#C13B1B;color:#F5F2EB}
+/* BGM 曲库（与一键出片同款） */
+.bgm-lib{border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#F8F5EE}
+.bgm-head{display:flex;gap:6px;align-items:center;font-size:11.5px;color:var(--muted);padding:7px 10px;background:#EDE9DE;border-bottom:1px solid var(--line)}
+.bgm-row{display:flex;align-items:center;gap:9px;padding:7px 10px;border-bottom:1px solid var(--line);font-size:12.5px}
+.bgm-row:last-child{border-bottom:0}
+.bgm-row:hover{background:#FCFAF4}
+.bgm-row.cur{background:#EFE0D8}
+.bgm-row .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bgm-row .mt{font:11px var(--mono);color:var(--dim);white-space:nowrap}
+.bgm-row .acts{display:flex;gap:4px;flex-shrink:0}
+.bgm-row .acts button{font:inherit;font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid var(--line);background:#EDE9DE;color:#6A665D;cursor:pointer;white-space:nowrap}
+.bgm-row .acts button:hover{border-color:#B0ACA1;background:#E4DFD1}
+.bgm-row .ab{font-size:10.5px;color:var(--accent);border:1px solid #CE8465;border-radius:999px;padding:1px 7px;white-space:nowrap}
+.bgm-empty{padding:14px 12px;font-size:12px;color:var(--dim);line-height:1.7}
+/* 字幕预览弹层里的条目 */
+.hp-row{padding:6px 9px;border-bottom:1px solid var(--line);cursor:pointer;font-size:12px;line-height:1.5}
+.hp-row:last-child{border-bottom:0}
+.hp-row:hover{background:#FCFAF4}
+.hp-row.hook{background:#FAEEDA;color:#8A5A10}
 </style>
 </head>
 <body>
@@ -530,18 +549,39 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
   <!-- ⑤ 合成 -->
   <section id="v5" hidden>
     <div class="card">
-      <h2>背景音乐 <span class="hint">口播是主音轨，BGM 自动压低；曲子比视频短会自动循环；选中列表里某一首 = 固定用它</span></h2>
+      <h2>背景音乐 <span class="hint">口播是主音轨，BGM 自动压低；曲子比视频短会自动循环</span></h2>
       <div class="row">
-        <select id="bgm-sel" style="flex:1;min-width:240px"></select>
+        <input type="text" id="bgm-q" placeholder="搜曲名…" style="flex:1;min-width:160px">
         <button class="g sm" id="btn-bgm-add">加音乐文件夹</button>
         <button class="g sm" id="btn-bgm-refresh">刷新</button>
       </div>
       <div class="hintline" id="bgm-msg" style="margin-top:8px"></div>
       <div class="row" id="bgm-dirs" style="margin-top:6px;gap:6px"></div>
+      <div id="bgm-lib" style="margin-top:10px"></div>
+      <div class="row" style="margin-top:12px">
+        <button class="g sm" id="btn-bgm-online">🌐 在线找曲（免费可商用）</button>
+        <span class="hintline">Kevin MacLeod 曲库 1400+ 首 · CC-BY 4.0 · 视频简介里署名即可商用</span>
+      </div>
+      <div id="bgm-online" hidden style="margin-top:8px">
+        <div class="row">
+          <input type="text" id="bgm-oq" placeholder="英文关键词，如 bright / calming / epic / mysterious…" style="flex:1;min-width:200px">
+          <button class="b sm" id="btn-bgm-osearch">搜索</button>
+          <button class="g sm" id="btn-bgm-orefresh" title="重新拉取在线目录（默认缓存一天）">刷新目录</button>
+        </div>
+        <div class="row" id="bgm-ochips" style="margin-top:6px;gap:6px"></div>
+        <div class="hintline" id="bgm-omsg" style="margin-top:4px">试听直接播；「入库」下载到你的音乐文件夹，之后和本地曲子一样用</div>
+        <div id="bgm-olist" style="margin-top:6px"></div>
+      </div>
       <div class="row" style="margin-top:10px">
         <button class="g sm" id="btn-bgm-play">试听</button>
         <audio id="bgm-audio" controls preload="none" style="flex:1;min-width:220px;height:34px"></audio>
       </div>
+      <div class="hintline" style="margin-top:6px">「试听」是 BGM 原曲；「试听混音」是<b>当前这条脚本的配音 + BGM 按下面的音量混 20 秒</b>，和成片里的听感一致</div>
+      <div class="row" style="margin-top:6px">
+        <button class="b sm" id="btn-mix-play">试听混音</button>
+        <audio id="mix-audio" controls preload="none" style="flex:1;min-width:220px;height:34px"></audio>
+      </div>
+      <div class="hintline" id="mix-msg" style="margin-top:4px"></div>
       <div class="grid2" style="margin-top:10px">
         <div><label class="f">BGM 音量 <b id="bgm-vol-v">0.10</b></label>
           <input type="range" id="bgm-vol" min="0" max="0.6" step="0.01" style="width:100%"></div>
@@ -631,6 +671,41 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
     <button class="b" id="btn-next">下一步 →</button>
   </div>
 </main>
+
+<div class="modal" id="subpv">
+  <div class="sheet" style="max-width:880px">
+    <h3>字幕预览 <span class="hint">渲染前先看效果 · 黄色标题字幕可改文案 / 时长 / 字号</span></h3>
+
+    <div class="sec">
+      <div style="display:grid;grid-template-columns:1fr 130px 130px;gap:10px">
+        <div><label class="f">黄字幕文案（留空 = 自动）</label><input type="text" id="hp-text" placeholder="如：这双鞋我穿了三个月"></div>
+        <div><label class="f">显示时长（秒）</label><input type="number" id="hp-dur" min="0.5" max="15" step="0.2"></div>
+        <div><label class="f">字号（0 = 跟随字幕）</label><input type="number" id="hp-size" min="0" max="160"></div>
+      </div>
+      <label class="hintline" style="display:flex;gap:6px;align-items:center;margin-top:8px">
+        <input type="checkbox" id="hp-on"> 显示黄色标题字幕</label>
+      <div class="row" style="margin-top:8px">
+        <button class="b sm" id="hp-save">保存并重预览</button>
+        <span class="hintline" id="hp-msg"></span>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:280px 1fr;gap:14px;margin-top:12px;align-items:start">
+      <div>
+        <div class="hintline" style="margin-bottom:6px">点条目看那一刻的画面</div>
+        <div id="hp-list" style="max-height:44vh;overflow:auto;border:1px solid var(--line);border-radius:9px"></div>
+      </div>
+      <div>
+        <img id="hp-img" alt="字幕预览" style="width:100%;border-radius:10px;background:#14120E;display:block">
+        <div class="hintline" id="hp-tip" style="margin-top:6px">预览取自成片画面，按画幅等比缩放；实际输出分辨率更高。</div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:16px;justify-content:flex-end">
+      <button class="g" id="hp-close">关闭</button>
+    </div>
+  </div>
+</div>
 
 <div class="jobctl" id="jobctl" hidden>
   <div class="jc-top"><b id="jc-kind">任务</b><span class="jc-pct" id="jc-pct">0%</span></div>
@@ -1743,6 +1818,11 @@ function renderScripts(){
     const d = mk("div","script" + (on?" on":""));
     const hd = mk("div","hd");
     hd.appendChild(mk("span","ttl", (i+1) + ". " + (s.angle_label||ANGLE_LABEL[s.angle]||"脚本")));
+    const bSub = mk("button","g sm","字幕");
+    bSub.style.cssText = "font-size:11px;padding:2px 8px;margin-left:auto";
+    bSub.title = "预览这条脚本的字幕，顺便调黄色标题字幕";
+    bSub.onclick = (ev)=>{ ev.stopPropagation(); openSubPv(S.pid, i); };
+    hd.appendChild(bSub);
     hd.appendChild(mk("span","chip", (s.sentences||[]).length + " 句"));
     const chars = (s.sentences||[]).reduce((a,b)=>a+(b.text||"").length,0);
     hd.appendChild(mk("span","chip", chars + " 字 ≈ " + (chars/4.6).toFixed(0) + "s"));
@@ -2117,16 +2197,86 @@ function renderBmResults(list, b){
   }
 }
 
-/* ---------- ⑤ 背景音乐 ---------- */
+/* ---------- 字幕预览（渲染前检查，黄字幕可调） ---------- */
+const SUBPV = {pid: "", idx: 0, t: 1.0};
+async function openSubPv(pid, idx){
+  if(!pid){ toast("先选一个项目"); return; }
+  SUBPV.pid = pid; SUBPV.idx = idx;
+  const v = (S.cfg && S.cfg.video) || {};
+  $("#hp-text").value = v.hook_text || "";
+  $("#hp-dur").value = v.hook_dur || 3.2;
+  $("#hp-size").value = v.hook_size || 0;
+  $("#hp-on").checked = v.hook !== false;
+  $("#subpv").classList.add("on");
+  await loadSubPv();
+}
+async function loadSubPv(){
+  $("#hp-list").innerHTML = "";
+  $("#hp-msg").textContent = "读取字幕…";
+  const r = await api("/api/pipe/sub/cues?pid=" + encodeURIComponent(SUBPV.pid) + "&idx=" + SUBPV.idx);
+  if(r.error){ $("#hp-msg").textContent = r.error; return; }
+  const rows = [];
+  if(r.hook) rows.push({start:r.hook.start, end:r.hook.end, text:r.hook.text, hook:true});
+  (r.cues || []).forEach(c=> rows.push(c));
+  const list = $("#hp-list");
+  list.innerHTML = "";
+  rows.forEach(c=>{
+    const row = mk("div", "hp-row" + (c.hook ? " hook" : ""));
+    const tm = mk("span", "tc", fmtDur(c.start) + "  ");
+    tm.style.color = c.hook ? "#B07818" : "var(--dim)";
+    row.appendChild(tm);
+    row.appendChild(document.createTextNode(c.text + (c.hook ? "（标题）" : "")));
+    row.onclick = ()=> hpPreview((c.start + c.end) / 2);
+    list.appendChild(row);
+  });
+  $("#hp-msg").textContent = rows.length + " 条字幕 · 每行最多 " +
+    ((r.video && r.video.sub_max_chars) || 14) + " 字";
+  if(rows.length) hpPreview((rows[0].start + rows[0].end) / 2);
+}
+function hpPreview(t){
+  SUBPV.t = Math.max(0, t);
+  $("#hp-img").src = "/api/pipe/sub/preview?pid=" + encodeURIComponent(SUBPV.pid) +
+    "&idx=" + SUBPV.idx + "&t=" + SUBPV.t.toFixed(2) + "&v=" + Date.now();
+  $("#hp-tip").textContent = "预览时间 " + fmtDur(SUBPV.t) + " · 取自成片画面，按画幅等比缩放";
+}
+$("#hp-save").onclick = async ()=>{
+  $("#hp-msg").textContent = "保存中…";
+  const r = await api("/api/pipe/config", {video:{
+    hook: $("#hp-on").checked,
+    hook_text: $("#hp-text").value.trim(),
+    hook_dur: +$("#hp-dur").value || 3.2,
+    hook_size: +$("#hp-size").value || 0
+  }});
+  if(r.error){ $("#hp-msg").textContent = r.error; return; }
+  S.cfg = r.config;
+  await loadSubPv();
+  toast("已保存，重新合成后生效");
+};
+$("#hp-close").onclick = ()=> $("#subpv").classList.remove("on");
+$("#subpv").onclick = e=> { if(e.target.id === "subpv") $("#subpv").classList.remove("on"); };
+
+/* ---------- ⑤ 背景音乐（曲库 + 在线找曲 + 混音试听） ---------- */
 S.bgmItems = [];
+S.bgmCur = "__none__";
+function bgmNice(n){
+  const s = (n || "").replace(/\.[a-z0-9]+$/i, "")
+    .replace(/\s*[-_·]\s*(视觉中国|vcg\.com|VCG)[^\s]*$/i, "")
+    .replace(/[_ ]?(正版商业)?音乐素材下载/g, "")
+    .replace(/\s{2,}/g, " ").trim();
+  return s || (n || "").replace(/\.[a-z0-9]+$/i, "");
+}
+function fmtMS(s){
+  s = Math.max(0, Math.round(s || 0));
+  return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+}
 function updateBgmAudio(){
-  const val = $("#bgm-sel").value || "";
   const a = $("#bgm-audio");
+  const val = S.bgmCur || "";
   if(!val || val.indexOf("__") === 0){ a.pause(); a.removeAttribute("src"); a.load(); return; }
   a.src = "/api/pipe/bgm/audio?path=" + encodeURIComponent(val);
 }
 async function saveBgmLive(){
-  const val = $("#bgm-sel").value || "__none__";
+  const val = S.bgmCur || "__none__";
   const mode = val === "__none__" ? "none" : (val === "__random__" ? "random" : "one");
   const video = {
     bgm: mode === "one" ? val : "",
@@ -2137,31 +2287,86 @@ async function saveBgmLive(){
   const r = await api("/api/pipe/config", {video});
   if(r && r.ok && S.cfg && S.cfg.video) Object.assign(S.cfg.video, video);
 }
+function setBgm(val){
+  S.bgmCur = val;
+  updateBgmAudio();
+  saveBgmLive();
+  renderBgmLib();
+  if($("#mix-audio").getAttribute("src")) $("#mix-msg").textContent = "换曲子了，重新点「试听混音」听新的效果";
+}
+function renderBgmLib(){
+  const box = $("#bgm-lib");
+  if(!box) return;
+  box.innerHTML = "";
+  const lib = mk("div", "bgm-lib");
+  const all = S.bgmItems || [];
+  const q = ($("#bgm-q").value || "").trim().toLowerCase();
+  const items = all.filter(x=>!q || (x.name || "").toLowerCase().includes(q));
+  const totalMb = all.reduce((a, x)=>a + (x.size || 0), 0) / 1048576;
+
+  const head = mk("div", "bgm-head");
+  head.appendChild(mk("span", null, "曲库 " + all.length + " 首" + (all.length ? " · " + totalMb.toFixed(1) + "MB" : "")));
+  if(q) head.appendChild(mk("span", null, " · 匹配 " + items.length + " 首"));
+  lib.appendChild(head);
+
+  const modeRow = (val, ico, label, hint)=>{
+    const r = mk("div", "bgm-row" + ((S.bgmCur || "__none__") === val ? " cur" : ""));
+    r.appendChild(mk("span", null, ico));
+    const nm = mk("div", "nm", label); nm.title = hint; r.appendChild(nm);
+    if((S.bgmCur || "__none__") === val) r.appendChild(mk("span", "ab", "正在使用"));
+    const acts = mk("div", "acts");
+    const b = mk("button", "g sm", (S.bgmCur || "__none__") === val ? "已选中" : "用这个");
+    b.disabled = (S.bgmCur || "__none__") === val;
+    b.onclick = ()=> setBgm(val);
+    acts.appendChild(b); r.appendChild(acts);
+    lib.appendChild(r);
+  };
+  modeRow("__none__", "🚫", "不要 BGM", "成片只有口播人声");
+  modeRow("__random__", "🎲", "随机一首", "每条成片从曲库里随机挑一首，互不一样");
+
+  if(!all.length){
+    lib.appendChild(mk("div", "bgm-empty", "曲库是空的——点「加音乐文件夹」，选一个放 BGM 的目录（mp3 / m4a / wav / flac / ogg / aac 都行）"));
+  } else if(!items.length){
+    lib.appendChild(mk("div", "bgm-empty", "没有匹配「" + q + "」的曲子"));
+  }
+  items.forEach(x=>{
+    const cur = S.bgmCur === x.path;
+    const r = mk("div", "bgm-row" + (cur ? " cur" : ""));
+    const nm = mk("div", "nm", "♪ " + bgmNice(x.name));
+    nm.title = x.path;
+    r.appendChild(nm);
+    if(cur) r.appendChild(mk("span", "ab", "正在使用"));
+    r.appendChild(mk("span", "mt", (x.dur ? fmtMS(x.dur) : "—") + " · " + ((x.size || 0) / 1048576).toFixed(1) + "MB"));
+    const acts = mk("div", "acts");
+    const bAud = mk("button", "g sm", "试听");
+    bAud.title = "听这首原曲（不改变当前选择）";
+    bAud.onclick = ()=>{
+      const a = $("#bgm-audio");
+      a.src = "/api/pipe/bgm/audio?path=" + encodeURIComponent(x.path);
+      a.play().catch(()=>toast("浏览器不允许播放，点播放器上的按钮试试"));
+    };
+    const bMix = mk("button", "g sm", "混音");
+    bMix.title = "用这首和当前脚本的配音混一段（不改变当前选择）";
+    bMix.onclick = ()=> mixPreview(x.path, "");
+    const bUse = mk("button", cur ? "b sm" : "g sm", cur ? "正在使用" : "用这首");
+    bUse.disabled = cur;
+    bUse.onclick = ()=> setBgm(x.path);
+    acts.appendChild(bAud); acts.appendChild(bMix); acts.appendChild(bUse);
+    r.appendChild(acts);
+    lib.appendChild(r);
+  });
+  box.appendChild(lib);
+}
 async function loadBgm(){
   let r;
   try{ r = await api("/api/pipe/bgm/list"); }catch(e){ r = {items:[], dirs:[]}; }
   S.bgmItems = r.items || [];
   const v = (S.cfg && S.cfg.video) || {};
-  const sel = $("#bgm-sel"); sel.innerHTML = "";
-  const oNone = mk("option", null, "不要 BGM"); oNone.value = "__none__";
-  const oRnd = mk("option", null, "随机一首（每条成片不一样）"); oRnd.value = "__random__";
-  sel.appendChild(oNone); sel.appendChild(oRnd);
-  if(S.bgmItems.length){
-    const og = document.createElement("optgroup");
-    og.label = "↓ 固定用这首（每条成片都一样）";
-    S.bgmItems.forEach(t=>{
-      const o = mk("option", null, t.name + (t.dur ? "  " + fmtDur(t.dur) : ""));
-      o.value = t.path; og.appendChild(o);
-    });
-    sel.appendChild(og);
-  }
   const mode = v.bgm_mode || "one";
-  let pick;
-  if(mode === "random") pick = "__random__";
-  else if(mode === "none") pick = "__none__";
-  else if(v.bgm && S.bgmItems.some(x=>x.path === v.bgm)) pick = v.bgm;
-  else pick = S.bgmItems.length ? S.bgmItems[0].path : "__none__";
-  sel.value = pick;
+  if(mode === "random") S.bgmCur = "__random__";
+  else if(mode === "none") S.bgmCur = "__none__";
+  else if(v.bgm && S.bgmItems.some(x=>x.path === v.bgm)) S.bgmCur = v.bgm;
+  else S.bgmCur = S.bgmItems.length ? S.bgmItems[0].path : "__none__";
 
   const vol = (v.bgm_volume != null) ? +v.bgm_volume : 0.1;
   $("#bgm-vol").value = vol;
@@ -2190,25 +2395,26 @@ async function loadBgm(){
   let msg;
   if(!dirs.length) msg = "还没加音乐文件夹——点「加音乐文件夹」，选一个放 BGM 的目录（支持 mp3 / m4a / wav / flac / ogg / aac）";
   else if(!S.bgmItems.length) msg = "目录里没找到音频文件，换一个目录试试";
-  else if(mode === "random") msg = "音乐库 " + S.bgmItems.length + " 首；合成时每条随机挑一首";
+  else if(S.bgmCur === "__random__") msg = "音乐库 " + S.bgmItems.length + " 首；合成时每条成片随机挑一首";
+  else if(S.bgmCur === "__none__") msg = "音乐库 " + S.bgmItems.length + " 首；当前不用 BGM";
   else {
-    const fixed = S.bgmItems.find(x=>x.path === ($("#bgm-sel").value || ""));
+    const fixed = S.bgmItems.find(x=>x.path === S.bgmCur);
     msg = "音乐库 " + S.bgmItems.length + " 首；" +
-          (fixed ? "已固定用「" + fixed.name + "」，每条成片都用这首"
-                 : "在下面列表选一首即为固定 BGM");
+          (fixed ? "已固定用「" + bgmNice(fixed.name) + "」，每条成片都用这首" : "在下面列表点「用这首」即固定");
   }
   if(r.bad && r.bad.length) msg += "；找不到的目录：" + r.bad.join("、");
   $("#bgm-msg").textContent = msg;
+  renderBgmLib();
   updateBgmAudio();
 }
-$("#bgm-sel").onchange = ()=>{ updateBgmAudio(); saveBgmLive(); };
+$("#bgm-q").addEventListener("input", ()=> renderBgmLib());
 $("#bgm-vol").oninput = ()=>{ $("#bgm-vol-v").textContent = (+$("#bgm-vol").value).toFixed(2); };
 $("#bgm-vol").onchange = ()=> saveBgmLive();
 $("#bgm-fade").onchange = ()=> saveBgmLive();
 $("#btn-bgm-refresh").onclick = ()=> loadBgm();
 $("#btn-bgm-play").onclick = ()=>{
   const a = $("#bgm-audio");
-  if(!a.getAttribute("src")){ toast("先选一首 BGM"); return; }
+  if(!a.getAttribute("src")){ toast("先在曲库里选/试听一首"); return; }
   if(a.paused) a.play().catch(()=>toast("浏览器不允许播放，点播放器上的按钮试试")); else a.pause();
 };
 $("#btn-bgm-add").onclick = async ()=>{
@@ -2222,6 +2428,134 @@ $("#btn-bgm-add").onclick = async ()=>{
   await loadBgm();
   toast("已加入音乐库");
 };
+
+/* 试听混音：当前脚本配音 + BGM 按当前音量/淡入淡出混 20s */
+let mixUrl = null;
+async function mixPreview(bgm, note, onlineFn){
+  const btn = $("#btn-mix-play"), msg = $("#mix-msg"), a = $("#mix-audio");
+  if(!S.pid){ toast("先选一个项目"); return; }
+  const cur = scriptAt(S.idx);
+  if(!cur || !(cur.tts || {}).audio){ toast("这条脚本还没配音——先在第 4 步「配音」", 4000); return; }
+  msg.textContent = note || "";
+  btn.disabled = true;
+  btn.textContent = "混音中…";
+  try{
+    const params = {vol: $("#bgm-vol").value, fade: $("#bgm-fade").value,
+                    pid: S.pid, idx: S.idx, dur: "20", t: Date.now()};
+    if(onlineFn) params.fn = onlineFn; else params.bgm = bgm;
+    const res = await fetch("/api/pipe/bgm/preview?" + new URLSearchParams(params));
+    if(!res.ok){
+      const j = await res.json().catch(()=>({error: "HTTP " + res.status}));
+      toast(j.error || "试听失败", 4000); return;
+    }
+    const vlabel = res.headers.get("X-Voice") ? decodeURIComponent(res.headers.get("X-Voice")) : "";
+    const blob = await res.blob();
+    if(mixUrl) URL.revokeObjectURL(mixUrl);
+    mixUrl = URL.createObjectURL(blob);
+    a.src = mixUrl;
+    a.play().catch(()=>toast("浏览器不允许自动播放，点混音播放器上的 ▶ 试试"));
+    if(vlabel) msg.textContent = (msg.textContent ? msg.textContent + " · " : "") + "人声用的是" + vlabel;
+  }catch(e){
+    toast("试听失败：" + e.message);
+  }finally{
+    btn.disabled = false;
+    btn.textContent = "试听混音";
+  }
+}
+$("#btn-mix-play").onclick = ()=>{
+  let bgm = S.bgmCur || "";
+  if(bgm === "__none__"){ toast("当前选的是「不要 BGM」，没什么可混的"); return; }
+  if(bgm === "__random__"){
+    const items = S.bgmItems || [];
+    if(!items.length){ toast("音乐库是空的，先「加音乐文件夹」"); return; }
+    bgm = items[Math.floor(Math.random() * items.length)].path;
+    mixPreview(bgm, "随机模式：这次抽到的曲子只是试听用，出片时每条仍会随机");
+    return;
+  }
+  mixPreview(bgm, "");
+};
+["#bgm-vol", "#bgm-fade"].forEach(id=>{
+  ["input", "change"].forEach(ev=>{
+    $(id).addEventListener(ev, ()=>{
+      if($("#mix-audio").getAttribute("src")) $("#mix-msg").textContent = "参数变了，重新点「试听混音」听新的效果";
+    });
+  });
+});
+
+/* 在线找曲（Incompetech，CC-BY 4.0） */
+let onlineOpened = false;
+$("#btn-bgm-online").onclick = async ()=>{
+  const box = $("#bgm-online");
+  box.hidden = !box.hidden;
+  if(!box.hidden && !onlineOpened){
+    onlineOpened = true;
+    onlineSearch("");
+  }
+};
+const O_CHIPS = ["bright", "calming", "bouncy", "relaxed", "uplifting", "humorous", "epic", "driving"];
+(function(){
+  const box = $("#bgm-ochips");
+  O_CHIPS.forEach(w=>{
+    const c = mk("button", "g sm", w);
+    c.style.cssText = "padding:2px 10px;border-radius:999px";
+    c.onclick = ()=>{ $("#bgm-oq").value = w; onlineSearch(w); };
+    box.appendChild(c);
+  });
+})();
+async function onlineSearch(q, refresh){
+  const msg = $("#bgm-omsg"), list = $("#bgm-olist");
+  msg.textContent = "搜索中…（第一次要拉在线目录，约 2~5 秒）";
+  list.innerHTML = "";
+  try{
+    const r = await api("/api/pipe/bgm/online/search?q=" + encodeURIComponent(q || "") + (refresh ? "&refresh=1" : ""));
+    if(r.error){ msg.textContent = r.error; return; }
+    const items = r.items || [];
+    msg.textContent = (q ? "「" + q + "」匹配 " : "曲库共 ") + items.length + " 首（全库 " + r.total + " 首）";
+    const lib = mk("div", "bgm-lib");
+    if(!items.length) lib.appendChild(mk("div", "bgm-empty", "没有匹配的曲子，换几个英文关键词试试"));
+    items.forEach(x=>{
+      const row = mk("div", "bgm-row");
+      const nm = mk("div", "nm", "♪ " + x.title);
+      nm.title = x.title + " ｜ " + (x.feel || "") + " ｜ " + (x.instruments || "");
+      row.appendChild(nm);
+      row.appendChild(mk("span", "mt", (x.dur ? fmtMS(x.dur) : "—") +
+        (x.genre ? " · " + x.genre : "") + (x.bpm ? " · " + x.bpm + "bpm" : "")));
+      const acts = mk("div", "acts");
+      const bAud = mk("button", "g sm", "试听");
+      bAud.onclick = ()=>{
+        const a = $("#bgm-audio");
+        a.src = "/api/pipe/bgm/online/audio?fn=" + encodeURIComponent(x.fn);
+        a.play().catch(()=>toast("浏览器不允许播放，点播放器上的按钮试试"));
+      };
+      const bMix = mk("button", "g sm", "混音");
+      bMix.title = "和配音混 20 秒听听效果（在线拉流，稍慢一点）";
+      bMix.onclick = ()=> mixPreview("", "", x.fn);
+      const bDl = mk("button", "b sm", "入库");
+      bDl.title = "下载到你的音乐文件夹，之后当本地曲子用";
+      bDl.onclick = async ()=>{
+        bDl.disabled = true; bDl.textContent = "下载中…";
+        try{
+          const r2 = await api("/api/pipe/bgm/online/download", {fn: x.fn});
+          if(r2.error){ toast("下载失败：" + r2.error, 5000); return; }
+          toast((r2.message || "已入库") + "；署名要求已写进曲库目录的「BGM 署名对照.txt」", 6000);
+          await loadBgm();
+          if(r2.path) setBgm(r2.path);
+        }finally{
+          bDl.disabled = false; bDl.textContent = "入库";
+        }
+      };
+      acts.appendChild(bAud); acts.appendChild(bMix); acts.appendChild(bDl);
+      row.appendChild(acts);
+      lib.appendChild(row);
+    });
+    list.appendChild(lib);
+  }catch(e){
+    msg.textContent = "搜索失败：" + e.message;
+  }
+}
+$("#btn-bgm-osearch").onclick = ()=> onlineSearch($("#bgm-oq").value.trim());
+$("#bgm-oq").addEventListener("keydown", e=>{ if(e.key === "Enter") onlineSearch($("#bgm-oq").value.trim()); });
+$("#btn-bgm-orefresh").onclick = ()=> onlineSearch($("#bgm-oq").value.trim(), true);
 
 /* ---------- 成片：播放器 + 列表 ---------- */
 function parseOutName(n){

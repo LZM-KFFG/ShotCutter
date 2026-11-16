@@ -394,6 +394,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
     </div>
     <div class="row" style="margin-top:14px">
       <button class="b" id="btn-one">出方案</button>
+      <button class="g" id="btn-one-stop" hidden title="停止当前任务，已完成的会保留">停止</button>
       <label class="hintline" style="display:flex;gap:6px;align-items:center">
         <input type="checkbox" id="one-llm" checked> 用大模型挑句/写稿
       </label>
@@ -1601,6 +1602,22 @@ function oneParams(){
   };
 }
 
+let ONEJOB = "";
+function setOneJob(id){
+  ONEJOB = id || "";
+  $("#btn-one-stop").hidden = !ONEJOB;
+  $("#btn-one-stop").disabled = false;
+  $("#btn-one-stop").textContent = "停止";
+}
+$("#btn-one-stop").onclick = async ()=>{
+  if(!ONEJOB){ return; }
+  const b = $("#btn-one-stop");
+  b.disabled = true; b.textContent = "停止中…";
+  const r = await api("/api/job/control", {id: ONEJOB, action: "stop"});
+  if(r.error){ toast(r.error, 4000); b.disabled = false; b.textContent = "停止"; return; }
+  toast("已请求停止，等当前这一步结束", 3000);
+};
+
 async function genPlans(replaceIdx, seed0){
   const base = oneParams();
   if(!base) return;
@@ -1610,12 +1627,14 @@ async function genPlans(replaceIdx, seed0){
   $("#one-msg").textContent = replaceIdx != null ? "换个挑法，重出这一条…" : "体检素材、转写、挑句…";
   const r = await api("/api/pipe/plan", body);
   if(r.error){ toast(r.error, 4000); $("#btn-one").disabled = false; return; }
+  setOneJob(r.job);
   const j = await pollJob(r.job, jj=>{
     bar($("#one-bar"), jj.progress || 0);
     $("#one-msg").textContent = jj.message || "";
   });
   $("#one-bar").style.display = "none";
   $("#btn-one").disabled = false;
+  setOneJob("");
   if(j.state === "error" || j.state === "cancel"){
     $("#one-msg").textContent = j.state === "error" ? ("失败：" + j.error) : "已停止";
     return;
@@ -1775,13 +1794,16 @@ async function renderIdxs(idxs){
   $("#one-msg").textContent = "开始渲染 " + idxs.length + " 条…";
   const r = await api("/api/pipe/render", {pid: PLAN.pid, idxs});
   if(r.error){ toast(r.error, 4000); $("#btn-one").disabled = false; return; }
+  setOneJob(r.job);
   const j = await pollJob(r.job, jj=>{
     bar($("#one-bar"), jj.progress || 0);
     $("#one-msg").textContent = jj.message || "";
   });
   $("#one-bar").style.display = "none";
   $("#btn-one").disabled = false;
-  $("#one-msg").textContent = j.state === "error" ? ("失败：" + j.error) : (j.message || "渲染完成");
+  setOneJob("");
+  $("#one-msg").textContent = j.state === "error" ? ("失败：" + j.error)
+    : (j.state === "cancel" ? "已停止（已完成的成片保留）" : (j.message || "渲染完成"));
   if(j.state !== "error" && j.state !== "cancel"){
     const outs = (j.result || {}).outs || [];
     showResult(outs, (j.result || {}).failed);
