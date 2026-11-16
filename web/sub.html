@@ -46,14 +46,25 @@ main{max-width:1240px;margin:0 auto;padding:26px 24px 150px}
 .pagehead h2{margin:0 0 6px;font-size:31px;font-weight:600}
 .pagehead p{margin:0;font-size:12.5px;color:var(--muted)}
 /* 暗版 + 右栏工作台 */
-.workbench{display:grid;grid-template-columns:1.52fr 1fr;gap:18px;align-items:start}
-.plate{background:var(--plate);border:1px solid var(--plate-line);border-radius:14px;padding:18px 18px 16px;min-height:420px;display:flex;flex-direction:column}
+.workbench{display:grid;grid-template-columns:minmax(520px,1.45fr) minmax(360px,1fr);gap:18px;align-items:start}
+.plate{background:var(--plate);border:1px solid var(--plate-line);border-radius:14px;padding:16px;
+  display:flex;flex-direction:column}
+/* 预览区：左图 + 右侧操作栏，把原来的空白用起来 */
+.pvbody{display:grid;grid-template-columns:auto minmax(230px,1fr);gap:20px;align-items:start}
+.pvside{display:flex;flex-direction:column;gap:18px;min-width:0;justify-content:center;padding:4px 0}
+.pvsec{min-width:0}
+.pvlabel{display:flex;justify-content:space-between;align-items:baseline;gap:8px;
+  font-size:11.5px;color:var(--plate-dim);letter-spacing:.06em;margin-bottom:7px}
+.pvlabel .tv{font:11.5px var(--mono);color:var(--plate-dim);min-width:52px;text-align:right}
+.pvside .arearow{margin-top:0}
+.pvside .plate-hint{margin-top:0;padding-top:2px}
+#pvCard .pvwrap{margin:0 auto}
 .plate-bar{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;color:var(--plate-dim);letter-spacing:.12em;margin-bottom:14px}
 .plate-empty{flex:1;display:none;align-items:center;justify-content:center;color:var(--plate-dim);font-size:12.5px;border:1px dashed var(--plate-line);border-radius:10px;line-height:1.8;text-align:center;padding:20px}
 .plate:has(#pvCard[hidden]) .plate-empty{display:flex}
+/* 空态时预览框和右栏等高，避免左下留一大块空白 */
+.plate:has(#pvCard[hidden]){min-height:520px}
 .plate .pvwrap{border-color:var(--plate-line);border-radius:10px}
-.plate .trow{color:var(--plate-dim)}
-.plate .trow .tv{color:var(--plate-dim)}
 .plate-hint{font-size:11.5px;color:var(--plate-dim);margin-top:12px;line-height:1.7}
 .side{display:flex;flex-direction:column;gap:14px;min-width:0}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:14px}
@@ -77,7 +88,7 @@ input[type=range]::-webkit-slider-runnable-track{height:4px;background:#C9C6BF;b
 input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
   background:#F5F2EB;border:2px solid var(--accent);margin-top:-5px;box-shadow:0 0 0 3px rgba(193,59,27,.14);cursor:pointer}
 .pvwrap{position:relative;display:inline-block;max-width:100%;border-radius:10px;overflow:hidden;border:1px solid var(--line);line-height:0;user-select:none}
-.pvwrap img{max-width:100%;max-height:420px;display:block;cursor:crosshair;pointer-events:none}
+.pvwrap img{max-width:100%;max-height:min(56vh,500px);display:block;cursor:crosshair;pointer-events:none}
 .pvwrap .ov{position:absolute;inset:0;cursor:crosshair}
 /* 抽帧失败提示层：必须默认隐藏，否则会盖住预览图 */
 #pvErr{display:none;position:absolute;inset:0;z-index:2;align-items:center;justify-content:center;
@@ -85,8 +96,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;heigh
 #pvErr[hidden]{display:none}
 #pvErr:not([hidden]){display:flex}
 .pvwrap .box{position:absolute;border:2px solid #C13B1B;background:rgba(193,59,27,.16);box-shadow:0 0 0 1px rgba(0,0,0,.5);display:none}
-.trow{display:flex;align-items:center;gap:10px;margin-top:10px}
-.trow .tv{font:11.5px var(--mono);color:var(--muted);min-width:72px;text-align:right}
 .arearow{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:12px}
 .arealabel{font-size:11.5px;color:var(--dim);margin-right:2px}
 .areaval{font:11.5px var(--mono);color:#C13B1B;background:var(--accent-2);border:1px solid #CE8465;border-radius:6px;padding:2px 9px}
@@ -141,19 +150,30 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
       <div class="plate-bar"><span>PREVIEW · 抽帧预览</span><span>拖框选区</span></div>
       <div class="plate-empty">选好视频后，这里显示预览帧<br>在画面上拖一个框罩住字幕</div>
       <div id="pvCard" hidden>
-        <div class="pvwrap">
-          <img id="pv" alt="预览帧">
-          <div id="pvErr" hidden></div>
-          <div class="ov" id="ov"></div>
-          <div class="box" id="box"></div>
-        </div>
-        <div class="trow">
-          <span style="font-size:11.5px;white-space:nowrap">抽帧时间</span>
-          <input type="range" id="tseek" min="0" max="10" step="0.5" value="1">
-          <span class="tv" id="tval">1.0s</span>
+        <div class="pvbody">
+          <div class="pvwrap">
+            <img id="pv" alt="预览帧">
+            <div id="pvErr" hidden></div>
+            <div class="ov" id="ov"></div>
+            <div class="box" id="box"></div>
+          </div>
+          <aside class="pvside">
+            <div class="pvsec">
+              <div class="pvlabel"><span>抽帧时间</span><b class="tv" id="tval">1.0s</b></div>
+              <input type="range" id="tseek" min="0" max="10" step="0.5" value="1">
+            </div>
+            <div class="pvsec">
+              <div class="pvlabel"><span>字幕区域</span><span class="areaval" id="areaval">-</span></div>
+              <div class="arearow">
+                <button class="g sm on" data-preset="bottom">底部字幕</button>
+                <button class="g sm" data-preset="top">顶部字幕</button>
+                <button class="g sm" data-preset="none">全帧自动</button>
+              </div>
+            </div>
+            <p class="plate-hint">框得越准，擦除越干净、速度也越快 —— 区域外的画面不用修复。默认按底部 30% 预估，先拖时间轴确认字幕真的在这个位置。</p>
+          </aside>
         </div>
       </div>
-      <p class="plate-hint">框得越准，擦除越干净、速度也越快 —— 区域外的画面不用修复。默认按底部 30% 预估，先拖时间轴确认字幕真的在这个位置。</p>
     </section>
 
     <div class="side">
@@ -164,17 +184,6 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
           <button class="g" id="btnBrowse">浏览</button>
         </div>
         <div class="info" id="info">还没选视频</div>
-      </div>
-
-      <div class="card">
-        <h3>字幕区域</h3>
-        <div class="arearow" style="margin-top:0">
-          <span class="arealabel">快捷</span>
-          <button class="g sm on" data-preset="bottom">底部字幕</button>
-          <button class="g sm" data-preset="top">顶部字幕</button>
-          <button class="g sm" data-preset="none">全帧自动</button>
-          <span class="areaval" id="areaval">-</span>
-        </div>
       </div>
 
       <div class="card">
