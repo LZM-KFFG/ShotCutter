@@ -67,6 +67,33 @@ python -m venv .venv
 
 ---
 
+## 搬到别的电脑用（便携安装包）
+
+`.venv` 绑定了本机的 Python 路径，**不能直接拷**。正确做法是打包一份安装包：
+
+```bat
+.venv\Scripts\python.exe pack.py            :: 生成 dist\ShotCutter-portable
+.venv\Scripts\python.exe pack.py --zip      :: 顺便压缩成 zip
+.venv\Scripts\python.exe pack.py --refresh  :: 依赖升级后重下 wheel
+```
+
+产出的文件夹里包含：代码 + `web/` + 干净的 `pipeline.json` + `tools\ffmpeg.exe`
++ `wheels\`（全部依赖的离线 wheel，含 GPU 的 cuBLAS/cuDNN）+ `安装.bat` / `启动.bat`。
+
+新电脑上只要：**装个 Python 3.12/3.13 → 双击 `安装.bat`（2~4 分钟，全程离线）→ 双击 `启动.bat`**。
+以后再换机器，整个文件夹拷过去、删掉 `.venv`、重新跑一次 `安装.bat` 即可。
+
+两个可选工具不随包附带，需要时单独放：
+
+| 工具 | 放法 |
+|---|---|
+| 视频变高清（video2x） | 解压到 `tools\VideoUpscaler`，或把 `pipeline.json` 的 `upscale.root` 指向它 |
+| 字幕去除（VSR） | 解压到任意位置，把 `pipeline.json` 的 `desub.root` 指向它 |
+
+两个路径都留空且找不到时，对应页面显示"未安装"，其它功能照常。
+
+---
+
 ## 启动
 
 | 方式 | 命令 | 特点 |

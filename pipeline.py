@@ -95,6 +95,8 @@ DEFAULT_CFG = {
     },
     # 去硬字幕：调用本机 VSR（D:\Tools\VSR）自带 Python 跑命令行模式
     "desub": {"root": DEFAULT_VSR},
+    # 视频变高清（video2x）根目录；留空=按默认路径找，便携包放在 tools\VideoUpscaler
+    "upscale": {"root": ""},
 }
 
 

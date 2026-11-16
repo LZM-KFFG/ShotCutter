@@ -1,6 +1,14 @@
+# ShotCutter 运行依赖（Windows）
+# 安装：.venv\Scripts\python.exe -m pip install -r requirements.txt
 scenedetect==0.7.2
-opencv-python>=4.9
-numpy>=1.26
-imageio-ffmpeg>=0.5
-pylnk3>=0.4
-edge-tts>=7.0
+opencv-python==5.0.0.93
+numpy==2.5.4
+imageio-ffmpeg==0.6.0
+pylnk3==0.4.3
+edge-tts==7.3.1
+faster-whisper==1.2.1
+
+# GPU 转写（cuBLAS 12 + cuDNN 9）。没有 N 卡也照装，运行时自动回落 CPU。
+# 想省 1.2GB 空间可以删掉这两行，并把 pipeline.json 的 director.asr_device 改成 cpu。
+nvidia-cublas-cu12==12.9.2.10; sys_platform == "win32"
+nvidia-cudnn-cu12==9.28.1.4; sys_platform == "win32"

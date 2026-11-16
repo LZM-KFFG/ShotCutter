@@ -1382,7 +1382,27 @@ try{
 
 # ================= 独立工具：视频变高清（video2x）/ 字幕去除（VSR） =================
 # 两个工具都是一次一个任务的 GPU 重活，各自一个单例跟踪器，不进 JOBS 池。
-VU_ROOT = Path(r"D:\VideoUpscaler")
+def _upscale_root() -> Path:
+    """视频变高清（video2x）的根目录。
+
+    优先级：pipeline.json 的 upscale.root → 默认 D:\\VideoUpscaler →
+    程序目录下的 tools\\VideoUpscaler（便携包就放这里）。都没有就返回默认值，
+    页面会显示"未安装"，其它功能不受影响。
+    """
+    try:
+        raw = str((pipe.load_cfg().get("upscale") or {}).get("root") or "").strip().strip('"')
+    except Exception:  # noqa: BLE001
+        raw = ""
+    if raw:
+        return Path(raw)
+    default = Path(r"D:\VideoUpscaler")
+    if default.exists():
+        return default
+    local = ROOT / "tools" / "VideoUpscaler"
+    return local if local.exists() else default
+
+
+VU_ROOT = _upscale_root()
 V2X = VU_ROOT / "tools" / "video2x.exe"
 VU_BIN = VU_ROOT / "tools" / "ffmpeg-9.0.2-essentials_build" / "bin"
 VU_FFPROBE = VU_BIN / "ffprobe.exe"
