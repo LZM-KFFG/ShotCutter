@@ -123,15 +123,16 @@
   .shot .play i{width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;
     display:flex;align-items:center;justify-content:center;font-size:10px;font-style:normal;padding-left:2px}
   /* 时间轴预览 */
-  .preview{border:1px solid #2a2a24;border-radius:10px;background:#15150f;margin-bottom:12px;overflow:hidden}
-  .pv-stage{position:relative;display:flex;justify-content:center;background:#000;min-height:120px}
+  .preview{border:1px solid var(--plate-line);border-radius:12px;background:var(--plate);margin-bottom:12px;overflow:hidden}
+  .pv-stage{position:relative;display:flex;justify-content:center;background:#0E0D0B;min-height:120px;
+    border-bottom:1px solid #2A2621}
   .pv-stage video{width:100%;max-height:330px;display:block;background:#000}
   .pv-fail{flex:1;max-width:560px;color:#C9C6BF;font-size:12.5px;text-align:center;padding:30px 20px;line-height:1.75}
   .pv-fail b{color:#fff;font-weight:500}
-  .pv-fail .ghost{margin-top:10px;background:#E1DCCF;border-color:#B8B4A8;color:#C9C6BF}
-  .pv-fail .ghost:hover{border-color:#A3A397;color:#fff}
+  .pv-fail .ghost{margin-top:10px;background:transparent;border-color:#3A342C;color:#B9B2A2}
+  .pv-fail .ghost:hover{border-color:#4C453B;color:#EDE7D9}
   .tl{position:relative;height:34px;margin:10px 12px 0;cursor:pointer;touch-action:none;user-select:none}
-  .tl-track{position:absolute;inset:0;background:#0e0e0a;border:1px solid #2a2a24;border-radius:4px;overflow:hidden}
+  .tl-track{position:absolute;inset:0;background:#0E0D0B;border:1px solid #2A2621;border-radius:5px;overflow:hidden}
   .tseg{position:absolute;top:0;bottom:0;overflow:hidden;background-size:cover;background-position:center;
     border-right:1px solid rgba(0,0,0,.55)}
   .tseg.off{filter:grayscale(1) brightness(.55)}
@@ -142,19 +143,21 @@
     box-shadow:0 0 0 1px rgba(0,0,0,.55)}
   .thead::before{content:"";position:absolute;top:-4px;left:-3px;width:8px;height:8px;border-radius:50%;background:#EDE9DE}
   .pv-ctl{display:flex;align-items:center;gap:8px;padding:10px 12px 11px;flex-wrap:wrap}
-  .pv-btn{background:#E1DCCF;border:1px solid #B8B4A8;color:#C9C6BF;border-radius:7px;padding:5px 10px;font-size:12px}
-  .pv-btn:hover{border-color:#A3A397;background:#E1DCCF}
-  .pv-btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
-  .pv-btn.on{background:#E8D4C9;border-color:#CE8465;color:#CE8465}
+  .pv-btn{font:inherit;background:#22201B;border:1px solid #35302A;color:#B9B2A2;border-radius:7px;
+    padding:5px 11px;font-size:12px;cursor:pointer;transition:.14s}
+  .pv-btn:hover{background:#2A2621;border-color:#433C33;color:#EDE7D9}
+  .pv-btn.pri{background:var(--accent);border-color:var(--accent);color:#F7F3EA;font-weight:600}
+  .pv-btn.pri:hover{background:#A93217;border-color:#A93217}
+  .pv-btn.on{background:rgba(193,59,27,.2);border-color:rgba(193,59,27,.5);color:#E9A78F;font-weight:600}
   .tl.onlysel .tseg.off{filter:grayscale(1) brightness(.3)}
   .tl.onlysel .tseg.off::before{content:"";position:absolute;inset:0;
     background:repeating-linear-gradient(45deg,rgba(0,0,0,.55) 0 4px,rgba(255,255,255,.06) 4px 8px)}
-  .pv-time em{font-style:normal;color:#7E7A70;margin-left:10px;font-size:11.5px}
-  .pv-time{font-family:var(--mono);font-size:12px;color:#C9C6BF;margin-left:auto}
-  .pv-time b{color:#fff;font-weight:500}
-  .pv-key{font-size:11px;color:#7E7A70;padding:0 12px 10px;line-height:1.5}
-  .pv-key kbd{font-family:var(--mono);font-size:10px;border:1px solid #B8B4A8;border-radius:3px;
-    padding:0 4px;color:#C9C6BF;background:#E8E4D8}
+  .pv-time em{font-style:normal;color:#8B8578;margin-left:10px;font-size:11.5px}
+  .pv-time{font-family:var(--mono);font-size:12px;color:#A9A292;margin-left:auto;letter-spacing:.02em}
+  .pv-time b{color:#EDE7D9;font-weight:600}
+  .pv-key{font-size:11px;color:#7E786B;padding:0 12px 10px;line-height:1.6}
+  .pv-key kbd{font-family:var(--mono);font-size:10px;border:1px solid #3A342C;border-radius:4px;
+    padding:0 5px;color:#B9B2A2;background:#22201B}
   .prog{height:4px;background:#DDD8CB;border-radius:2px;overflow:hidden;margin:10px 0 2px}
   .prog i{display:block;height:100%;background:var(--accent);width:0;transition:width .25s}
   .empty{color:var(--faint);font-size:12.5px;padding:26px;text-align:center;border:1px dashed var(--line);border-radius:12px;background:#E4DFD1}

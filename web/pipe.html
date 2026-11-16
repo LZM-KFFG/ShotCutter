@@ -64,6 +64,17 @@ main{max-width:1360px;margin:0 auto;padding:20px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
 label.f{display:block;font-size:11.5px;color:var(--muted);margin-bottom:4px}
+/* 已检测视频：可勾选清单（多选 / 全部导入） */
+.vlist{min-height:92px;max-height:138px;overflow:auto;border:1px solid var(--line-2);border-radius:9px;background:#EDE9DE}
+.vlist .vempty{padding:10px 11px;font-size:11.5px;color:var(--dim)}
+.vrow{display:flex;align-items:center;gap:8px;padding:5px 10px;border-bottom:1px solid var(--line);
+  font-size:12px;cursor:pointer;user-select:none}
+.vrow:last-child{border-bottom:0}
+.vrow:hover{background:#E5E0D2}
+.vrow.on{background:var(--accent-2)}
+.vrow input{margin:0;accent-color:#C13B1B}
+.vrow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vrow .sc{font:10.5px var(--mono);color:var(--dim);white-space:nowrap}
 input[type=text],input[type=number],input[type=password],textarea,select{
   width:100%;font:inherit;font-size:13px;padding:7px 10px;border:1px solid var(--line-2);border-radius:8px;background:#EDE9DE;color:var(--ink);outline:none}
 input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(193,59,27,.13)}
@@ -361,10 +372,12 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
           </div>
         </div>
         <div>
-          <label class="f">或从已检测的视频导入镜头</label>
-          <div class="row">
-            <select id="vids" style="flex:1"><option value="">（先在切割器里检测视频）</option></select>
-            <button class="g sm" id="btn-addvid">导入</button>
+          <label class="f">或从已检测的视频导入镜头 <span id="vid-cnt" style="font-weight:400"></span></label>
+          <div class="vlist" id="vids"><div class="vempty">先在切割器里检测视频</div></div>
+          <div class="row" style="margin-top:8px">
+            <button class="b sm" id="btn-addvid">导入所选</button>
+            <button class="g sm" id="btn-addvid-all">全部导入</button>
+            <button class="g sm" id="btn-vid-none">清空勾选</button>
           </div>
         </div>
       </div>
@@ -1394,12 +1407,48 @@ $("#btn-scan").onclick = async ()=>{
   $("#scan-msg").textContent = j.state === "error" ? ("失败：" + j.error) : j.message;
   loadPool();
 };
-$("#btn-addvid").onclick = async ()=>{
-  const v = $("#vids").value;
-  if(!v){ toast("先选一个已检测的视频"); return; }
-  const r = await api("/api/pipe/addvideo", {token:v});
-  if(r.error) toast(r.error); else { toast("导入 " + r.added + " 个镜头"); loadPool(); }
-};
+/* ---------- 已检测视频：多选导入 ---------- */
+let VIDEOS = [];
+function vidPicked(){
+  return [...document.querySelectorAll("#vids input:checked")].map(x=>x.value);
+}
+function renderVids(){
+  const box = $("#vids");
+  box.innerHTML = "";
+  if(!VIDEOS.length){
+    box.innerHTML = '<div class="vempty">先在切割器里检测视频</div>';
+    $("#vid-cnt").textContent = "";
+    return;
+  }
+  VIDEOS.forEach(v=>{
+    const row = mk("label", "vrow");
+    const ck = document.createElement("input");
+    ck.type = "checkbox"; ck.value = v.token;
+    ck.onchange = ()=>{
+      row.classList.toggle("on", ck.checked);
+      const n = vidPicked().length;
+      $("#vid-cnt").textContent = n ? ("已选 " + n) : "";
+    };
+    row.appendChild(ck);
+    row.appendChild(mk("span", "nm", v.name));
+    row.appendChild(mk("span", "sc", (v.scenes||0) + " 镜头"));
+    if(!(v.scenes||0)) row.style.opacity = ".5";
+    box.appendChild(row);
+  });
+  $("#vid-cnt").textContent = "";
+}
+async function importVids(tokens){
+  if(!tokens.length){ toast("先勾选要导入的视频（或点「全部导入」）"); return; }
+  const r = await api("/api/pipe/addvideo", {tokens});
+  if(r.error){ toast(r.error, 5000); return; }
+  toast("已导入 " + r.added + " 个镜头（" + r.videos + " 个视频）"
+        + (r.skipped ? "，" + r.skipped + " 个跳过" : ""), 3500);
+  renderVids();
+  loadPool();
+}
+$("#btn-addvid").onclick = ()=> importVids(vidPicked());
+$("#btn-addvid-all").onclick = ()=> importVids(VIDEOS.map(v=>v.token));
+$("#btn-vid-none").onclick = ()=> renderVids();
 $("#btn-tag").onclick = ()=> doTag(false);$("#btn-tagall").onclick = ()=> doTag(true);
 
 /* ---------- 去硬字幕（VSR） ---------- */
@@ -3042,18 +3091,14 @@ async function boot(){
   // 已检测的视频列表
   try{
     const vids = await api("/api/pipe/videos");
-    const sel = $("#vids"); sel.innerHTML = "";
-    (vids.videos||[]).forEach(v=>{
-      const o = mk("option", null, v.name + "（" + (v.scenes||0) + " 镜头）"); o.value = v.token; sel.appendChild(o);
-    });
-    if(!(vids.videos||[]).length) sel.innerHTML = "<option value=''>（先在切割器里检测视频）</option>";
+    VIDEOS = vids.videos || [];
+    renderVids();
   }catch(e){}
   renderOut();
   if(qs.get("cfg")){ $("#modal").classList.add("on"); refreshLstat(); }
   const want = parseInt(qs.get("step") || "0", 10);
-  if(want >= 1 && want <= 5) go(want);
-  else if(S.pid && S.project && (S.project.scripts||[]).length) go(2);
-  else go(1);
+  // 默认落在第 1 步（素材）：流水线是「先有素材再谈脚本」，直接跳脚本页会让人不知道从哪开始
+  go(want >= 1 && want <= 5 ? want : 1);
 }
 $("#btn-cfg").onclick = ()=>{ $("#modal").classList.add("on"); refreshLstat(); };
 $("#btn-close").onclick = ()=> $("#modal").classList.remove("on");

@@ -3115,15 +3115,28 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if u.path == "/api/pipe/addvideo":
-            video = VIDEOS.get((payload.get("token") or "").strip())
-            if not video:
-                self._json({"error": "视频不存在，请重新添加"}, 404)
+            raw = payload.get("tokens")
+            if isinstance(raw, (list, tuple)):
+                toks = [str(x).strip() for x in raw if str(x).strip()]
+            else:
+                one = str(payload.get("token") or "").strip()
+                toks = [one] if one else []
+            if not toks:
+                self._json({"error": "先选要导入的视频"}, 400)
                 return
-            if not video.get("scenes"):
-                self._json({"error": "这个视频还没检测出镜头"}, 400)
+            added, used, skipped = 0, 0, []
+            for t in toks:
+                video = VIDEOS.get(t)
+                if not video or not video.get("scenes"):
+                    skipped.append(t)
+                    continue
+                added += pipe.add_scenes_of(video)
+                used += 1
+            if not used:
+                self._json({"error": "这些视频都还没检测出镜头，先在切割器里检测一遍"}, 400)
                 return
-            n = pipe.add_scenes_of(video)
-            self._json({"ok": True, "added": n})
+            self._json({"ok": True, "added": added, "videos": used,
+                        "skipped": len(skipped)})
             return
 
         if u.path == "/api/pipe/desub/zip":
