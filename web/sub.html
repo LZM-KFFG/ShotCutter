@@ -46,24 +46,51 @@ main{max-width:1240px;margin:0 auto;padding:26px 24px 150px}
 .pagehead h2{margin:0 0 6px;font-size:31px;font-weight:600}
 .pagehead p{margin:0;font-size:12.5px;color:var(--muted)}
 /* 暗版 + 右栏工作台 */
-.workbench{display:grid;grid-template-columns:minmax(520px,1.45fr) minmax(360px,1fr);gap:18px;align-items:start}
-.plate{background:var(--plate);border:1px solid var(--plate-line);border-radius:14px;padding:16px;
+.workbench{display:grid;grid-template-columns:minmax(520px,1.18fr) minmax(380px,1fr);gap:18px;align-items:start}
+.plate{background:var(--plate);border:1px solid var(--plate-line);border-radius:14px;padding:14px 16px 16px;
   display:flex;flex-direction:column}
-/* 预览区：左图 + 右侧操作栏，把原来的空白用起来 */
-.pvbody{display:grid;grid-template-columns:auto minmax(230px,1fr);gap:20px;align-items:start}
-.pvside{display:flex;flex-direction:column;gap:18px;min-width:0;justify-content:center;padding:4px 0}
-.pvsec{min-width:0}
+/* 预览区：左监视器 + 右检视面板（面板独立成块，内容分层，不再浮在空白里） */
+.pvbody{display:grid;grid-template-columns:auto minmax(252px,1fr);gap:16px;align-items:stretch}
+#pvCard .pvwrap{margin:0;align-self:start}
+.pvside{display:flex;flex-direction:column;justify-content:space-between;align-self:stretch;min-width:0;
+  background:#1B1915;border:1px solid #2B2721;border-radius:10px;padding:15px 16px 13px}
+.pvsec{min-width:0;padding-bottom:14px;margin-bottom:14px;border-bottom:1px solid #2A2621}
+.pvsec:last-of-type{padding-bottom:0;margin-bottom:0;border-bottom:0}
 .pvlabel{display:flex;justify-content:space-between;align-items:baseline;gap:8px;
-  font-size:11.5px;color:var(--plate-dim);letter-spacing:.06em;margin-bottom:7px}
-.pvlabel .tv{font:11.5px var(--mono);color:var(--plate-dim);min-width:52px;text-align:right}
-.pvside .arearow{margin-top:0}
-.pvside .plate-hint{margin-top:0;padding-top:2px}
-#pvCard .pvwrap{margin:0 auto}
+  font-family:var(--mono);font-size:10.5px;color:#A9A292;letter-spacing:.12em;margin-bottom:9px}
+.pvlabel .tv{font:12.5px var(--mono);color:#EDE7D9;letter-spacing:0;min-width:48px;text-align:right}
+/* 区域模式徽标 */
+.pvbadge{font:10px var(--mono);color:#E6A891;background:rgba(193,59,27,.18);
+  border:1px solid rgba(193,59,27,.42);border-radius:999px;padding:2.5px 8px;letter-spacing:.06em}
+/* 区域读数：2×2 小格 */
+.readout{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:#2A2621;
+  border:1px solid #2A2621;border-radius:8px;overflow:hidden}
+.readout div{background:#22201B;padding:7px 10px;display:flex;align-items:baseline;justify-content:space-between;gap:6px}
+.readout dt{font:10px var(--mono);color:#928B7D;letter-spacing:.1em;margin:0}
+.readout dd{margin:0;font:12.5px var(--mono);color:#EFE9DB;letter-spacing:.02em}
+/* 分段控件 */
+.seg{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid #35302A;border-radius:8px;
+  overflow:hidden;background:#22201B}
+.seg button{font:inherit;font-size:12px;padding:7px 2px;border:0;border-right:1px solid #35302A;
+  background:transparent;color:#A49D8E;cursor:pointer;transition:.14s;white-space:nowrap}
+.seg button:last-child{border-right:0}
+.seg button:hover{background:#2A2621;color:#EDE7D9}
+.seg button.on{background:#EDE7D9;color:#171614;font-weight:600}
+.pvside .plate-hint{margin:12px 0 0;padding-top:11px;border-top:1px solid #2A2621;font-size:11px;color:#9A9386}
+/* 横屏素材：图占满宽度，检视面板挪到底部横排（侧栏会把横屏图压得很小） */
+.pvbody.wide{display:flex;flex-direction:column;gap:14px;align-items:stretch}
+.pvbody.wide .pvwrap{align-self:center}
+.pvbody.wide .pvside{flex-direction:row;align-items:flex-start;justify-content:flex-start;gap:20px;padding:12px 15px}
+.pvbody.wide .pvsec{flex:1 1 0;min-width:0;padding:0;margin:0;border:0}
+.pvbody.wide .pvsec:first-child{flex:1 1 0}
+.pvbody.wide .pvsec:last-of-type{flex:0 0 184px}
+.pvbody.wide .pvsec + .pvsec{border-left:1px solid #332E28;padding-left:16px}
+.pvbody.wide .plate-hint{display:none}
 .plate-bar{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10.5px;color:var(--plate-dim);letter-spacing:.12em;margin-bottom:14px}
 .plate-empty{flex:1;display:none;align-items:center;justify-content:center;color:var(--plate-dim);font-size:12.5px;border:1px dashed var(--plate-line);border-radius:10px;line-height:1.8;text-align:center;padding:20px}
 .plate:has(#pvCard[hidden]) .plate-empty{display:flex}
 /* 空态时预览框和右栏等高，避免左下留一大块空白 */
-.plate:has(#pvCard[hidden]){min-height:520px}
+.plate:has(#pvCard[hidden]){min-height:470px}
 .plate .pvwrap{border-color:var(--plate-line);border-radius:10px}
 .plate-hint{font-size:11.5px;color:var(--plate-dim);margin-top:12px;line-height:1.7}
 .side{display:flex;flex-direction:column;gap:14px;min-width:0}
@@ -88,7 +115,7 @@ input[type=range]::-webkit-slider-runnable-track{height:4px;background:#C9C6BF;b
 input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;
   background:#F5F2EB;border:2px solid var(--accent);margin-top:-5px;box-shadow:0 0 0 3px rgba(193,59,27,.14);cursor:pointer}
 .pvwrap{position:relative;display:inline-block;max-width:100%;border-radius:10px;overflow:hidden;border:1px solid var(--line);line-height:0;user-select:none}
-.pvwrap img{max-width:100%;max-height:min(56vh,500px);display:block;cursor:crosshair;pointer-events:none}
+.pvwrap img{max-width:100%;max-height:min(48vh,440px);display:block;cursor:crosshair;pointer-events:none}
 .pvwrap .ov{position:absolute;inset:0;cursor:crosshair}
 /* 抽帧失败提示层：必须默认隐藏，否则会盖住预览图 */
 #pvErr{display:none;position:absolute;inset:0;z-index:2;align-items:center;justify-content:center;
@@ -98,7 +125,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;heigh
 .pvwrap .box{position:absolute;border:2px solid #C13B1B;background:rgba(193,59,27,.16);box-shadow:0 0 0 1px rgba(0,0,0,.5);display:none}
 .arearow{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:12px}
 .arealabel{font-size:11.5px;color:var(--dim);margin-right:2px}
-.areaval{font:11.5px var(--mono);color:#C13B1B;background:var(--accent-2);border:1px solid #CE8465;border-radius:6px;padding:2px 9px}
 button.sm{font-size:12px;padding:5px 11px}
 .warn{font-size:11.5px;color:var(--warn);line-height:1.65;margin-top:10px}
 .prog-wrap{display:none}
@@ -163,14 +189,23 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
               <input type="range" id="tseek" min="0" max="10" step="0.5" value="1">
             </div>
             <div class="pvsec">
-              <div class="pvlabel"><span>字幕区域</span><span class="areaval" id="areaval">-</span></div>
-              <div class="arearow">
-                <button class="g sm on" data-preset="bottom">底部字幕</button>
-                <button class="g sm" data-preset="top">顶部字幕</button>
-                <button class="g sm" data-preset="none">全帧自动</button>
+              <div class="pvlabel"><span>字幕区域</span><span class="pvbadge" id="areamode">底部 30%</span></div>
+              <dl class="readout">
+                <div><dt>上</dt><dd id="rd-y0">—</dd></div>
+                <div><dt>下</dt><dd id="rd-y1">—</dd></div>
+                <div><dt>左</dt><dd id="rd-x0">—</dd></div>
+                <div><dt>右</dt><dd id="rd-x1">—</dd></div>
+              </dl>
+            </div>
+            <div class="pvsec">
+              <div class="pvlabel"><span>快捷预设</span></div>
+              <div class="seg">
+                <button class="on" data-preset="bottom">底部</button>
+                <button data-preset="top">顶部</button>
+                <button data-preset="none">全帧</button>
               </div>
             </div>
-            <p class="plate-hint">框得越准，擦除越干净、速度也越快 —— 区域外的画面不用修复。默认按底部 30% 预估，先拖时间轴确认字幕真的在这个位置。</p>
+            <p class="plate-hint">框得越准擦除越干净，区域外不用修复。默认按底部 30% 预估，先拖时间轴确认字幕位置。</p>
           </aside>
         </div>
       </div>
@@ -241,8 +276,7 @@ function applyPreset(name){
     b.classList.toggle("on", b.dataset.preset === name));
   if(name === "none"){
     state.area = null;
-    $("#areaval").textContent = "全帧自动检测";
-    $("#box").style.display = "none";
+    paintArea();
     return;
   }
   if(!v || !v.height) return;
@@ -257,10 +291,20 @@ function areaStr(){
   return a ? `${a.y0},${a.y1},${a.x0},${a.x1}` : "none";
 }
 
+const PRESET_LABEL = {bottom:"底部 30%", top:"顶部 30%", none:"全帧自动", custom:"手动框选"};
+function paintReadout(){
+  const a = state.area, badge = $("#areamode");
+  if(badge) badge.textContent = PRESET_LABEL[state.preset] || "手动框选";
+  [["rd-y0", a && a.y0], ["rd-y1", a && a.y1], ["rd-x0", a && a.x0], ["rd-x1", a && a.x1]]
+    .forEach(([id, v]) => {
+      const el = $("#" + id);
+      if(el) el.textContent = (v === null || v === undefined || v === false) ? "—" : v;
+    });
+}
 function paintArea(){
+  paintReadout();
   const a = state.area;
-  if(!a){ $("#areaval").textContent = "全帧自动检测"; $("#box").style.display = "none"; return; }
-  $("#areaval").textContent = `ymin,ymax,xmin,xmax = ${areaStr()}`;
+  if(!a){ $("#box").style.display = "none"; return; }
   const img = $("#pv");
   const sw = img.naturalWidth, sh = img.naturalHeight;
   if(!sw || !sh) return;
@@ -350,6 +394,9 @@ function showPvErr(msg){
 }
 $("#pv").addEventListener("load", ()=>{
   $("#pvErr").hidden = true;
+  const im = $("#pv");
+  const body = document.querySelector(".pvbody");
+  if(body) body.classList.toggle("wide", im.naturalWidth > im.naturalHeight);
   paintArea();
 });
 $("#pv").addEventListener("error", ()=>{
