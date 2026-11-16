@@ -1182,7 +1182,8 @@ def director_worker(job: dict, project: dict, product: dict, target: float = 45.
                     mode: str = "auto", topup: bool = False,
                     variants: int = 1, seed0: int = 0,
                     only_paths: list | None = None,
-                    avoid_texts: list | None = None) -> dict:
+                    avoid_texts: list | None = None,
+                    skip_paths: list | None = None) -> dict:
     """一键主流程。
 
     mode  auto   口播够就走原声直剪，不够/没有就改走 AI 写稿 + 配音
@@ -1200,7 +1201,22 @@ def director_worker(job: dict, project: dict, product: dict, target: float = 45.
     if folders:
         pipe.scan_folders(folders, job)
     cls = classify(items_in(folders), job=job)
-    aroll, broll = list(cls["aroll"]), list(cls["broll"])
+    aroll_all, broll_all = list(cls["aroll"]), list(cls["broll"])
+    aroll, broll = list(aroll_all), list(broll_all)
+    skip_set: set[str] = set()
+    for x in (skip_paths or []):
+        try:
+            skip_set.add(str(Path(str(x)).resolve()).lower())
+        except OSError:
+            continue
+    if skip_set:
+        def _keep(it: dict) -> bool:
+            try:
+                return str(Path(str(it.get("path") or "")).resolve()).lower() not in skip_set
+            except OSError:
+                return True
+        aroll = [x for x in aroll if _keep(x)]
+        broll = [x for x in broll if _keep(x)]
     n = max(1, int(variants))
 
     # 先转写：只有转录出句子的素材才算「能用来原声直剪」。
@@ -1342,7 +1358,27 @@ def director_worker(job: dict, project: dict, product: dict, target: float = 45.
     project["active"] = idxs[0]
     pipe.project_save(project)
 
+    a_ids = {x.get("id") for x in aroll_all}
+    materials = []
+    for it in aroll_all + broll_all:
+        a = it.get("audio") or {}
+        try:
+            path = str(it.get("path") or "")
+            excluded = str(Path(path).resolve()).lower() in skip_set
+        except OSError:
+            path, excluded = str(it.get("path") or ""), False
+        materials.append({
+            "path": path,
+            "name": it.get("name") or Path(path).name,
+            "dur": round(float(a.get("dur") or it.get("dur") or 0), 2),
+            "has_audio": bool(a.get("has_audio")),
+            "speech": round(float(a.get("speech") or 0), 3),
+            "kind": "aroll" if it.get("id") in a_ids else "broll",
+            "excluded": excluded,
+        })
+
     out = {
+        "materials": materials,
         "script_idx": idxs[0], "script_idxs": idxs,
         "mode": order[0] if len(set(order)) == 1 else "mixed",
         "plan": order, "note": note,

@@ -2821,6 +2821,8 @@ class Handler(BaseHTTPRequestHandler):
                 mode = "auto"
             use_llm = bool(payload.get("use_llm", True))
             topup = bool(payload.get("topup", False))
+            raw_skip = payload.get("skip_paths") or []
+            skip_paths = [str(x) for x in raw_skip] if isinstance(raw_skip, (list, tuple)) else []
             p = pipe.project_load(payload.get("pid") or "")
             if not p:
                 p = pipe.project_new(product.get("name") or "一键成片")
@@ -2831,7 +2833,7 @@ class Handler(BaseHTTPRequestHandler):
 
             def _plan(job=job, p=p, product=product, target=target, cfg=cfg,
                       use_llm=use_llm, norm=norm, mix=mix, mode=mode, topup=topup,
-                      count=count, seed0=seed0, rep=rep):
+                      count=count, seed0=seed0, rep=rep, skip_paths=skip_paths):
                 job["message"] = "体检素材…"
                 old = None
                 if rep is not None:
@@ -2850,7 +2852,7 @@ class Handler(BaseHTTPRequestHandler):
                 info = dirw.director_worker(job, p, product, target, cfg, use_llm,
                                             "keep", norm, mix, True, mode, topup,
                                             1 if rep is not None else count, seed0,
-                                            only, avoid)
+                                            only, avoid, skip_paths)
                 job["state"] = "running"
                 # 重挑但换不出新句子（这条素材的句子被第一版用光了）时，改走 AI 写稿换角度：
                 # 用户点「重挑」是想看见一条不一样的，返回同一批句子等于没反应。
@@ -2865,7 +2867,8 @@ class Handler(BaseHTTPRequestHandler):
                         p["scripts"].pop()          # 撤掉这次挑的，下面会重新算
                         info = dirw.director_worker(job, p, product, target, cfg, use_llm,
                                                     "keep", norm, 0.0, True, "script",
-                                                    topup, 1, seed0 + 1)
+                                                    topup, 1, seed0 + 1,
+                                                    None, None, skip_paths)
                         job["state"] = "running"
                         fresh = (p.get("scripts") or [])[-1]
                         fresh["note"] = ((fresh.get("note") or "")
@@ -2889,7 +2892,8 @@ class Handler(BaseHTTPRequestHandler):
                 p["scripts"] = lst
                 p["active"] = 0
                 pipe.project_save(p)
-                job["result"] = {"pid": p["id"], "plans": plan_view(p), "info": info}
+                job["result"] = {"pid": p["id"], "plans": plan_view(p), "info": info,
+                                 "materials": (info or {}).get("materials") or []}
                 job["state"] = "done"
                 job["progress"] = 1.0
                 job["message"] = "出了 %d 个方案，挑一个渲染" % len(p.get("scripts") or [])

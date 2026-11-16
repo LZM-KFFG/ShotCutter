@@ -404,6 +404,18 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
     </div>
     <div class="bar" id="one-bar" style="display:none"><i></i></div>
     <div class="hintline" id="one-msg" style="margin-top:8px">先出方案（体检 → 转写 → 挑句），你挑完再渲染。<b>多条时按素材分组：一条口播素材出一个方案</b>。</div>
+    <div id="mat-panel" hidden style="margin-top:14px">
+      <div class="row" style="gap:8px;align-items:baseline">
+        <b style="font-size:13px">素材体检</b>
+        <span class="hintline" id="mat-sum"></span>
+        <span style="flex:1"></span>
+        <button class="g sm" id="mat-all">全选</button>
+        <button class="g sm" id="mat-good" title="取消勾选「太短」这类明显不能用的">只留可用的</button>
+        <button class="g sm" id="mat-replan" title="用当前勾选重新出方案">按勾选重出方案</button>
+      </div>
+      <div class="hintline" style="margin-top:4px">取消勾选 = 这条这次不参与（不改原文件，只影响这次出方案）</div>
+      <div id="mat-list" style="margin-top:8px;max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:10px"></div>
+    </div>
     <div id="one-plans" style="margin-top:14px"></div>
   </div>
 
@@ -1603,6 +1615,69 @@ function oneParams(){
 }
 
 let ONEJOB = "";
+let MATS = [];              // 最近一次体检的素材清单（来自出方案结果）
+const MAT_SKIP = new Set(); // 被取消勾选的素材 path（本次不参与）
+function matKindLabel(m){
+  if(m.kind === "aroll") return "口播";
+  if(!m.has_audio) return "空镜 · 静音";
+  return "空镜";
+}
+function matIssues(m){
+  const out = [];
+  if((m.dur || 0) < 2) out.push("太短");
+  else if((m.dur || 0) < 6 && m.kind === "aroll") out.push("偏短");
+  if(m.kind === "broll" && m.has_audio && (m.speech || 0) < 0.2) out.push("几乎无语音");
+  return out;
+}
+function renderMaterials(){
+  const panel = $("#mat-panel"), box = $("#mat-list");
+  if(!panel || !box) return;
+  if(!MATS.length){ panel.hidden = true; return; }
+  panel.hidden = false;
+  box.innerHTML = "";
+  const nA = MATS.filter(m=>m.kind === "aroll").length;
+  const nB = MATS.length - nA;
+  $("#mat-sum").textContent = "共 " + MATS.length + " 条 · 口播 " + nA + " / 空镜 " + nB +
+    (MAT_SKIP.size ? " · 已排除 " + MAT_SKIP.size : "");
+  MATS.forEach(m=>{
+    const skip = MAT_SKIP.has(m.path);
+    const row = mk("div");
+    row.style.cssText = "display:flex;align-items:center;gap:9px;padding:6px 10px;border-bottom:1px solid var(--line);font-size:12px"
+      + (skip ? ";opacity:.45" : "");
+    const ck = document.createElement("input");
+    ck.type = "checkbox"; ck.checked = !skip; ck.style.margin = "0";
+    ck.onchange = ()=>{
+      if(ck.checked) MAT_SKIP.delete(m.path); else MAT_SKIP.add(m.path);
+      renderMaterials();
+    };
+    row.appendChild(ck);
+    const nm = mk("span", null, m.name || (m.path || "").split(/[\\/]/).pop());
+    nm.style.cssText = "flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap";
+    nm.title = m.path || "";
+    row.appendChild(nm);
+    const chips = mk("span", null, (m.dur ? fmtDur(m.dur) : "—") +
+      (m.has_audio && m.kind === "broll" ? " · 语音 " + Math.round((m.speech || 0) * 100) + "%" : ""));
+    chips.style.cssText = "font:11px var(--mono);color:var(--dim);white-space:nowrap";
+    row.appendChild(chips);
+    const kind = mk("span", "qcb" + (m.kind === "aroll" ? " ok" : ""));
+    kind.textContent = matKindLabel(m);
+    kind.style.cursor = "default";
+    row.appendChild(kind);
+    matIssues(m).forEach(t=>{
+      const w = mk("span", "qcb warn", t);
+      w.style.cursor = "default";
+      row.appendChild(w);
+    });
+    box.appendChild(row);
+  });
+}
+$("#mat-all").onclick = ()=>{ MAT_SKIP.clear(); renderMaterials(); };
+$("#mat-good").onclick = ()=>{
+  MAT_SKIP.clear();
+  MATS.forEach(m=>{ if(matIssues(m).length) MAT_SKIP.add(m.path); });
+  renderMaterials();
+};
+$("#mat-replan").onclick = ()=> genPlans(null, 0);
 function setOneJob(id){
   ONEJOB = id || "";
   $("#btn-one-stop").hidden = !ONEJOB;
@@ -1622,6 +1697,7 @@ async function genPlans(replaceIdx, seed0){
   const base = oneParams();
   if(!base) return;
   const body = Object.assign({}, base, {pid: PLAN.pid, seed0: seed0 || 0});
+  if(MAT_SKIP.size) body.skip_paths = [...MAT_SKIP];
   if(replaceIdx != null) body.replace_idx = replaceIdx;
   $("#btn-one").disabled = true;
   $("#one-msg").textContent = replaceIdx != null ? "换个挑法，重出这一条…" : "体检素材、转写、挑句…";
@@ -1641,6 +1717,8 @@ async function genPlans(replaceIdx, seed0){
   }
   PLAN.pid = r.pid;
   PLAN.plans = (j.result || {}).plans || [];
+  MATS = (j.result || {}).materials || [];
+  renderMaterials();
   $("#one-msg").textContent = j.message || "";
   renderPlans();
 }
@@ -1818,7 +1896,10 @@ $("#btn-res-dir").onclick = ()=> openFolder(RES.dir);
 
 (async function boot(){
   $("#one-folders").value = localStorage.getItem("pipe_one_folders") || "";
-  $("#one-folders").addEventListener("input", ()=> localStorage.setItem("pipe_one_folders", $("#one-folders").value));
+  $("#one-folders").addEventListener("input", ()=>{
+    localStorage.setItem("pipe_one_folders", $("#one-folders").value);
+    if(MATS.length){ MATS = []; MAT_SKIP.clear(); renderMaterials(); }
+  });
   setupFolderDrop($("#one-folders"), $("#one-dir-msg"), "pipe_one_folders");
   await loadCfg();
   loadBgm();
