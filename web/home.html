@@ -151,12 +151,30 @@ a{color:inherit;text-decoration:none}
     <span>SHOTCUTTER · 首页</span>
     <span id="work-dir">…</span>
     <span>ffmpeg · PySceneDetect · VSR · video2x</span>
+    <span id="quit-svc" title="停止本地服务（桌面版用这个退出）">退出服务</span>
   </div>
 
 </div>
 
 <script>
 const $ = s => document.querySelector(s);
+
+/* 退出服务：桌面版（ShotCutter.exe）启动的本地服务，点这里关掉 */
+const QS = document.getElementById("quit-svc");
+if(QS){
+  QS.style.cursor = "pointer";
+  QS.addEventListener("click", async ()=>{
+    if(!confirm("退出 ShotCutter 服务？\n\n退出后页面会失效，下次双击 ShotCutter.exe 重新启动。")) return;
+    try{
+      const r = await fetch("/api/shutdown");
+      const d = await r.json();
+      if(d.error){ alert(d.error); return; }
+      document.body.innerHTML = '<div style="padding:60px;text-align:center;font:16px system-ui;color:#444">' +
+        '服务已退出，可以关闭这个页面了。<br><br>' +
+        '<span style="font-size:13px;color:#888">下次双击 ShotCutter.exe 重新启动</span></div>';
+    }catch(e){ alert("退出失败：" + e.message); }
+  });
+}
 
 async function jget(url, ms){
   const c = new AbortController(); const t = setTimeout(()=>c.abort(), ms||5000);

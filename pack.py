@@ -24,7 +24,7 @@ PY = HERE / ".venv" / "Scripts" / "python.exe"
 OUT = HERE / "dist" / "ShotCutter-portable"
 
 CODE_FILES = ["app.py", "pipeline.py", "director.py", "qc.py", "vsr_runner.py",
-              "launch.py", "requirements.txt", "app.ico", "README.md",
+              "launch.py", "launcher.py", "requirements.txt", "app.ico", "README.md",
               "start.bat", "serve.bat"]
 CODE_DIRS = ["web", "samples"]
 
@@ -141,8 +141,8 @@ README_TXT = r'''ShotCutter 便携安装包
   2) 别的都不用装，依赖和 ffmpeg 都在包里
 
 二、怎么装
-  双击「安装.bat」→ 等 2~4 分钟 → 看到"安装完成"即可
-  装完双击「启动.bat」，浏览器会自动打开 127.0.0.1:8777
+  双击「安装.bat」→ 等 1 分钟 → 看到"安装完成"即可
+  装完双击「ShotCutter.exe」（或「启动.bat」），浏览器会自动打开 127.0.0.1:8777
 
 三、以后搬去第三台电脑
   整个文件夹拷过去，删掉 .venv 目录，重新双击「安装.bat」即可
@@ -216,10 +216,12 @@ pause
 EMBED_README = r'''ShotCutter 免安装版（自带 Python 运行时）
 ========================================
 
-双击「启动.bat」就能用，不需要安装 Python、不需要联网装依赖。
+双击「ShotCutter.exe」就能用：服务在后台启动，浏览器自动打开。
+不需要安装 Python、不需要联网装依赖。
+（「启动.bat」是备用入口，效果相同，只是会留一个黑窗口显示日志）
 
   浏览器地址：http://127.0.0.1:8777
-  停止服务：关掉那个黑窗口（或用 serve.bat 让它后台常驻）
+  停止服务：网页页脚的「退出服务」，或运行 ShotCutter.exe --stop
 
 目录说明
   python\        自带的 Python 运行时和全部依赖（别删）
@@ -238,6 +240,26 @@ EMBED_README = r'''ShotCutter 免安装版（自带 Python 运行时）
    字幕去除   → 解压到任意位置，改 pipeline.json 的 desub.root
 '''
 
+
+
+def build_exe(quiet: bool = False) -> Path:
+    """用 PyInstaller 打桌面启动器 exe（约 8MB，双击即用）。"""
+    out = HERE / "dist" / "_exe"
+    cmd = [str(PY), "-m", "PyInstaller", "--onefile", "--noconsole", "--clean",
+           "--name", "ShotCutter", "--icon", str(HERE / "app.ico"),
+           "--distpath", str(out),
+           "--workpath", str(HERE / "_work" / "_pyi"),
+           "--specpath", str(HERE / "_work" / "_pyi"),
+           str(HERE / "launcher.py")]
+    print("打包桌面启动器 exe…")
+    r = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
+    exe = out / "ShotCutter.exe"
+    if r.returncode != 0 or not exe.exists():
+        print(r.stdout[-1500:] if not quiet else "")
+        print(r.stderr[-1500:] if not quiet else "")
+        raise SystemExit("exe 打包失败")
+    print("  exe OK（%.1f MB）" % (exe.stat().st_size / 1048576))
+    return exe
 
 def _download(url: str, dst: Path) -> None:
     import urllib.request  # noqa: PLC0415
@@ -325,6 +347,9 @@ def build_embed(refresh_wheels: bool, zip_it: bool = False) -> int:
     copy_item(ff, EMBED_OUT / "tools" / "ffmpeg.exe")
     copy_item(ff, EMBED_OUT / "python" / "ffmpeg.exe")   # 双保险：运行时目录也放一份
 
+    if build_exe():
+        copy_item(HERE / "dist" / "_exe" / "ShotCutter.exe", EMBED_OUT / "ShotCutter.exe")
+
     (EMBED_OUT / "启动.bat").write_text(EMBED_START, encoding="utf-8")
     (EMBED_OUT / "serve.bat").write_text(
         '@echo off\r\nchcp 65001 >nul\r\ncd /d "%~dp0"\r\n'
@@ -408,6 +433,7 @@ def main() -> int:
     ap.add_argument("--embed", action="store_true",
                     help="额外生成免安装版（自带 Python 运行时，双击即用）")
     ap.add_argument("--only-embed", action="store_true", help="只生成免安装版")
+    ap.add_argument("--exe", action="store_true", help="同时打包桌面启动器 ShotCutter.exe")
     args = ap.parse_args()
 
     if not PY.exists():
@@ -444,6 +470,9 @@ def main() -> int:
     print("  ffmpeg OK（%.0f MB）" % (ff.stat().st_size / 1048576))
 
     download_wheels(OUT, args.refresh)
+
+    if args.exe:
+        copy_item(build_exe(), OUT / "ShotCutter.exe")
 
     (OUT / "setup_env.py").write_text(SETUP_PY, encoding="utf-8")
     (OUT / "安装.bat").write_text(INSTALL_BAT, encoding="utf-8")

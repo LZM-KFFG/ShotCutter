@@ -2105,6 +2105,17 @@ class Handler(BaseHTTPRequestHandler):
                 return
             src = proxy_path(video) if (q.get("proxy") or [""])[0] == "1" else Path(video["path"])
             self._stream(src)
+        elif u.path == "/api/shutdown":
+            # 给桌面版（ShotCutter.exe）用：网页页脚点「退出服务」就停掉
+            if self.client_address[0] not in ("127.0.0.1", "::1"):
+                self._json({"error": "只允许本机操作"}, 403)
+                return
+            busy = any(j.get("state") == "running" for j in JOBS.values())
+            if busy or HD_JOB.running or SUB_JOB.running:
+                self._json({"error": "还有任务在跑，等它跑完再退出"}, 400)
+                return
+            self._json({"ok": True, "message": "服务正在退出"})
+            threading.Timer(0.8, lambda: os._exit(0)).start()
         elif u.path == "/api/health":
             try:
                 import scenedetect

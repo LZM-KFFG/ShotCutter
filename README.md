@@ -83,12 +83,17 @@ python -m venv .venv
 新电脑上只要：**装个 Python 3.12/3.13 → 双击 `安装.bat`（2~4 分钟，全程离线）→ 双击 `启动.bat`**。
 以后再换机器，整个文件夹拷过去、删掉 `.venv`、重新跑一次 `安装.bat` 即可。
 
-**连 Python 都不想装？用免安装版**（自带 Python 运行时，约 2.6GB）：
+**连 Python 都不想装？用免安装版**（自带 Python 运行时，约 2.6GB），双击 `ShotCutter.exe` 即用
+（服务后台启动 + 自动开浏览器，网页页脚可「退出服务」；`ShotCutter.exe --stop` 也能停）：
 
 ```bat
-.venv\Scripts\python.exe pack.py --only-embed        :: 生成 dist\ShotCutter-免安装
+.venv\Scripts\python.exe pack.py --only-embed        :: 生成 dist\ShotCutter-免安装（含 exe）
 .venv\Scripts\python.exe pack.py --only-embed --zip  :: 顺便压成 zip（约 1.2GB）
 ```
+
+`ShotCutter.exe` 是桌面启动器（PyInstaller 打包，约 8MB）：双击 → 后台起服务 → 自动开浏览器 →
+自己退出；停止用网页页脚的「退出服务」或 `ShotCutter.exe --stop`。它**不**把 2.6GB 依赖塞进 exe
+（单文件每次启动都要解压几百 MB，又慢又容易被杀软误报），只负责找运行时、拉起服务、开页面。
 
 拷到新电脑 → 双击 `启动.bat` → 浏览器自动打开，**不需要装 Python、不需要联网**。
 `serve.bat` 可以让它后台常驻，关掉黑窗口也不停。
