@@ -1741,6 +1741,26 @@ def _sub_pump(stream):
                 buf = b""
 
 
+_GPU_NAME: list[str] = []
+
+
+def gpu_name() -> str:
+    """本机 N 卡型号；没有就返回空串。结果缓存，别每次都调 nvidia-smi。"""
+    if _GPU_NAME:
+        return _GPU_NAME[0]
+    name = ""
+    try:
+        r = subprocess.run(["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+                           capture_output=True, text=True, errors="replace",
+                           timeout=8, creationflags=NO_WINDOW)
+        if r.returncode == 0 and (r.stdout or "").strip():
+            name = r.stdout.strip().splitlines()[0].strip()
+    except Exception:  # noqa: BLE001
+        name = ""
+    _GPU_NAME.append(name)
+    return name
+
+
 def sub_worker(inp: str, area: str):
     try:
         out = os.path.join(os.path.dirname(inp),
@@ -1760,6 +1780,9 @@ def sub_worker(inp: str, area: str):
                     "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"})
         cmd = [str(VSR_PY), str(VSR_RUN), inp, area or "none"]
         SUB_JOB.log("$ " + " ".join('"%s"' % c if " " in c else c for c in cmd))
+        _gpu = gpu_name()
+        SUB_JOB.log("加速设备：" + (("GPU · " + _gpu) if _gpu
+                                    else "CPU（没检测到 NVIDIA 显卡，会慢很多）"))
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                 cwd=str(VSR_RES), env=env,
                                 creationflags=NO_WINDOW, bufsize=0)
@@ -2164,7 +2187,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(HD_JOB.snapshot())
         elif u.path == "/api/sub/info":
             self._json({"ok": True, "vsr": VSR_PY.exists() and VSR_RUN.exists(),
-                        "root": str(VSR_ROOT)})
+                        "root": str(VSR_ROOT), "gpu": gpu_name()})
         elif u.path == "/api/sub/status":
             self._json(SUB_JOB.snapshot())
         elif u.path == "/api/sub/frame":

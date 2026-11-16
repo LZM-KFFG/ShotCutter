@@ -128,6 +128,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
     <p class="kicker">TOOL · <b>02</b> · VSR 本地引擎</p>
     <h2>字幕去除</h2>
     <p>先抽一帧确认字幕位置，框选区域后开始。擦除速度取决于显卡，长视频请耐心。</p>
+    <p class="hintline" id="engine-note" style="margin-top:7px">正在检测加速设备…</p>
   </div>
 
   <div class="workbench">
@@ -421,6 +422,18 @@ document.querySelectorAll("[data-preset]").forEach(b =>
 
 (async function init(){
   const info = await api("/api/sub/info").catch(() => null);
+  const note = $("#engine-note");
+  if(note){
+    if(info && info.gpu){
+      note.textContent = "加速设备：GPU · " + info.gpu + "（字幕检测与擦除都走 CUDA）";
+      note.style.color = "var(--ok)";
+    } else if(info){
+      note.textContent = "加速设备：CPU（没检测到 NVIDIA 显卡，速度会慢很多）";
+      note.style.color = "var(--warn)";
+    } else {
+      note.textContent = "";
+    }
+  }
   if(info && !info.vsr){
     const w = $("#warnBox"); w.hidden = false;
     w.textContent = "找不到 VSR 引擎：" + info.root + " —— 请确认 D:\\Tools\\VSR 目录还在。";
