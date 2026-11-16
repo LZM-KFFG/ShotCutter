@@ -1567,6 +1567,20 @@ def hd_build_command(p: dict, inp: str, out: str, phase: str) -> list[str]:
 _V2X_PROG = re.compile(r"frame=(\d+)/(\d+)[^;]*;\s*fps=([\d.]+)")
 
 
+def _decode_line(raw: bytes) -> str:
+    """VSR / video2x 自己打的是 UTF-8（我们设了 PYTHONIOENCODING），
+    但它们内部调 ffmpeg / 系统命令时输出的是 GBK，混在一起就会乱码。"""
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        for enc in ("gbk", "cp936", "big5"):
+            try:
+                return raw.decode(enc)
+            except UnicodeDecodeError:
+                continue
+        return raw.decode("utf-8", "replace")
+
+
 def _hd_pump(stream, phase: str):
     """video2x 的进度用 \\r 刷新，逐字符读。"""
     buf = b""
@@ -1575,7 +1589,7 @@ def _hd_pump(stream, phase: str):
         if not chunk:
             break
         if chunk in (b"\r", b"\n"):
-            line = buf.decode("utf-8", "replace")
+            line = _decode_line(buf)
             buf = b""
             m = _V2X_PROG.search(line)
             if m:
@@ -1706,7 +1720,7 @@ def _sub_pump(stream):
         if not chunk:
             break
         if chunk in (b"\r", b"\n"):
-            line = buf.decode("utf-8", "replace")
+            line = _decode_line(buf)
             buf = b""
             low = line.strip()
             if low.startswith("[Processing] start finding"):
@@ -1812,17 +1826,46 @@ def sub_worker(inp: str, area: str):
             SUB_JOB.finished_at = time.time()
 
 
-def sub_frame(path: str, t: float) -> Path:
-    """抽一帧给前端画字幕区域框。"""
-    out = WORK / "sub_frames" / (hashlib.md5(f"{path}|{t}".encode("utf-8")).hexdigest()[:16] + ".jpg")
-    if not out.exists():
-        out.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run([FFMPEG, "-y", "-ss", "%.2f" % max(0.0, t), "-i", path,
-                        "-frames:v", "1", "-q:v", "3", str(out)],
-                       capture_output=True, creationflags=NO_WINDOW, timeout=60)
-    if not out.exists():
-        raise RuntimeError("抽帧失败，无法预览")
-    return out
+def sub_frame(path: str, t: float) -> tuple[Path, float]:
+    """抽一帧给前端画字幕区域框。
+
+    会踩的坑：
+    1) 有的片子色彩范围（yuvj）让 mjpeg 编码器直接拒绝 → 加 -strict unofficial / 先转 yuvj420p
+    2) 素材没下载完整（partial file）时，靠后的秒数解不出来 → 依次退到更早的时间点
+    """
+    t = max(0.0, float(t))
+    out = WORK / "sub_frames" / (hashlib.md5(f"{path}|{t:.2f}".encode("utf-8")).hexdigest()[:16] + ".jpg")
+    if out.exists() and out.stat().st_size > 0:
+        return out, t
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    def attempt(at: float, extra: list) -> str:
+        try:
+            out.unlink(missing_ok=True)
+        except OSError:
+            pass
+        args = [FFMPEG, "-y", "-ss", "%.2f" % at, "-i", path,
+                "-frames:v", "1", "-q:v", "3"] + extra + [str(out)]
+        r = subprocess.run(args, capture_output=True, creationflags=NO_WINDOW, timeout=90)
+        if out.exists() and out.stat().st_size > 0:
+            return ""
+        return (r.stderr or b"").decode("utf-8", "replace")[-300:]
+
+    err = ""
+    for at in (t, max(0.0, t - 2.0), 1.0, 0.0):
+        for extra in (["-strict", "unofficial"], ["-vf", "format=yuvj420p", "-strict", "unofficial"]):
+            err = attempt(at, extra)
+            if not err:
+                return out, at
+    hint = "抽帧失败，无法预览"
+    low = err.lower()
+    if "partial file" in low or "invalid nal" in low or "nothing was encoded" in low:
+        hint += "：这个文件看起来没下载完整或已损坏（靠后的画面解不出来），换一条素材，或把抽帧时间拖到开头试试"
+    elif "non full-range" in low:
+        hint += "：这个片子的色彩范围特殊，编码器不认"
+    elif err:
+        hint += "：" + err.replace(chr(10), " ")[-120:]
+    raise RuntimeError(hint)
 
 
 def _kill_proc(proc) -> bool:
@@ -2023,7 +2066,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         self.wfile.write(body)
 
-    def _file(self, path: Path, ctype: str):
+    def _file(self, path: Path, ctype: str, extra: dict | None = None):
         if not path.exists():
             self.send_error(404)
             return
@@ -2032,6 +2075,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        for k, v in (extra or {}).items():
+            self.send_header(k, str(v))
         self.end_headers()
         if self.head_only:
             return
@@ -2197,7 +2242,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "文件不存在"}, 404)
                 return
             try:
-                self._file(sub_frame(path, float(ts or 0)), "image/jpeg")
+                img, at = sub_frame(path, float(ts or 0))
+                self._file(img, "image/jpeg", {"X-Frame-At": "%.2f" % at})
             except Exception as exc:  # noqa: BLE001
                 self._json({"error": str(exc)}, 500)
         elif u.path in ("/pipeline", "/pipe.html"):

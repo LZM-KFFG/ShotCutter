@@ -138,6 +138,8 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
       <div id="pvCard" hidden>
         <div class="pvwrap">
           <img id="pv" alt="预览帧">
+          <div id="pvErr" hidden style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+               padding:26px;text-align:center;line-height:1.9;font-size:12.5px;color:#D8D2C4;background:rgba(20,18,14,.94)"></div>
           <div class="ov" id="ov"></div>
           <div class="box" id="box"></div>
         </div>
@@ -301,14 +303,46 @@ function paintArea(){
 
 /* ---------- 抽帧 ---------- */
 let seekTimer = null;
-function loadFrame(){
+let frameUrl = null;
+async function loadFrame(){
   const v = state.video;
   if(!v) return;
   const t = +$("#tseek").value;
   $("#tval").textContent = t.toFixed(1) + "s";
-  $("#pv").src = "/api/sub/frame?path=" + encodeURIComponent(v.path) + "&t=" + t;
+  const url = "/api/sub/frame?path=" + encodeURIComponent(v.path) + "&t=" + t;
+  try{
+    const r = await fetch(url);
+    if(!r.ok){
+      const j = await r.json().catch(()=>null);
+      showPvErr((j && j.error) || "抽帧失败：换一个时间点或换一条素材试试");
+      return;
+    }
+    const at = parseFloat(r.headers.get("X-Frame-At") || "");
+    const blob = await r.blob();
+    if(frameUrl) URL.revokeObjectURL(frameUrl);
+    frameUrl = URL.createObjectURL(blob);
+    $("#pv").src = frameUrl;
+    $("#pvErr").hidden = true;
+    if(!isNaN(at) && Math.abs(at - t) > 0.05){
+      toast("这个位置解不出来，已用 " + at.toFixed(1) + " 秒的画面", 4500);
+    }
+  }catch(e){
+    showPvErr("抽帧失败：" + e.message);
+  }
 }
-$("#pv").addEventListener("load", paintArea);
+function showPvErr(msg){
+  const box = $("#pvErr");
+  box.hidden = false;
+  box.textContent = msg;
+}
+$("#pv").addEventListener("load", ()=>{
+  $("#pvErr").hidden = true;
+  paintArea();
+});
+$("#pv").addEventListener("error", ()=>{
+  if(!frameUrl) return;              // fetch 那条路已经给过提示了
+  showPvErr("预览图加载失败，换一个时间点试试");
+});
 $("#tseek").addEventListener("input", () => {
   $("#tval").textContent = (+$("#tseek").value).toFixed(1) + "s";
   clearTimeout(seekTimer);
