@@ -2096,6 +2096,12 @@ function renderShots(){
   $("#k-mats").textContent = p.stats.materials;
   $("#k-total").textContent = p.total.toFixed(1) + "s";
   $("#k-reuse").textContent = p.stats.reuse;
+  const dirs = p.stats.dirs || [];
+  if(dirs.length > 1){
+    wrap.appendChild(mk("div", "warn",
+      "这批镜头来自 " + dirs.length + " 个目录：" + dirs.join(" · ") +
+      " —— 如果只是同一个商品的原片+空镜就没问题，否则检查是不是混了别的素材"));
+  }
   const tb = mk("table","shots");
   tb.innerHTML = "<thead><tr><th style='width:34px'>#</th><th style='width:104px'>时间码</th><th style='width:88px'>素材</th><th>口播</th><th style='width:196px'>标签</th><th style='width:82px'></th></tr></thead>";
   const body = document.createElement("tbody");

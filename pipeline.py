@@ -2783,14 +2783,42 @@ def _score(item: dict, keys: list[str], usage: dict, want: float, last: dict | N
     return s
 
 
-def align(project: dict, script: dict, cfg: dict, seed: int | None = None) -> dict:
+def _scope_roots(folders) -> list[str]:
+    roots = []
+    for f in folders or []:
+        try:
+            roots.append(str(Path(str(f)).resolve()).lower().rstrip("\\/"))
+        except OSError:
+            continue
+    return roots
+
+
+def scope_items(items: list[dict], folders) -> list[dict]:
+    """只保留落在这些目录下的素材。
+
+    一键出片的素材范围存在 project["folders"] 里；不填就沿用整个池子（流水线的手动用法）。
+    """
+    roots = _scope_roots(folders)
+    if not roots:
+        return items
+    out = []
+    for it in items:
+        p = str(it.get("path") or "").lower()
+        if any(p.startswith(r + "\\") or p.startswith(r + "/") for r in roots):
+            out.append(it)
+    return out
+
+
+def align(project: dict, script: dict, cfg: dict, seed: int | None = None,
+          folders=None) -> dict:
     tts = script.get("tts") or {}
     sents = tts.get("sentences") or []
     if not sents:
         raise RuntimeError("还没有配音，先做配音这一步")
-    items = pool_list()
+    scope = folders if folders is not None else (project.get("folders") or [])
+    items = scope_items(pool_list(), scope)
     if not items:
-        raise RuntimeError("素材库是空的，先在「素材」里加入素材")
+        raise RuntimeError("这个项目的素材范围里没有素材（检查素材文件夹，或重新出一次方案）")
 
     v = cfg["video"]
     target_shot = float(v.get("shot") or 2.2)
@@ -2867,6 +2895,15 @@ def align(project: dict, script: dict, cfg: dict, seed: int | None = None) -> di
                 clips[-1]["want"] = clips[-1]["dur"]
                 break
 
+    src_dirs = set()
+    for c in clips:
+        try:
+            par = Path(str(c.get("path") or "")).parent
+            if par.name:
+                src_dirs.add("%s/%s" % (par.parent.name, par.name))
+        except OSError:
+            continue
+
     plan = {
         "clips": clips, "total": round(sum(c["dur"] for c in clips), 3),
         "audio": tts.get("audio"), "shot": target_shot,
@@ -2874,6 +2911,7 @@ def align(project: dict, script: dict, cfg: dict, seed: int | None = None) -> di
             "clips": len(clips), "materials": len({c["item_id"] for c in clips}),
             "reuse": max(usage.values()) if usage else 0,
             "pool": len(items),
+            "dirs": sorted(src_dirs),
         },
         "at": time.time(),
     }
@@ -2888,7 +2926,7 @@ def swap_clip(project: dict, script: dict, clip_index: int, cfg: dict) -> dict:
     if not (0 <= clip_index < len(clips)):
         raise RuntimeError("镜头序号越界")
     cur = clips[clip_index]
-    items = pool_list()
+    items = scope_items(pool_list(), project.get("folders") or [])
     keys = _keys(_hint_of(script, cur.get("sentence", 0), cur.get("text", "")))
     ranked = sorted(items, key=lambda it: -_score(it, keys, {}, cur["want"], None))
     ids = [it["id"] for it in ranked]

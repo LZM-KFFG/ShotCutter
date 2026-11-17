@@ -3125,6 +3125,8 @@ class Handler(BaseHTTPRequestHandler):
             for f in folders:
                 for line in str(f).replace(";", "\n").splitlines():
                     line = line.strip().strip('"').strip("'")
+                    if line:
+                        line = os.path.normpath(line)   # 顺手把 // 与 ./ 这类写法归一
                     if line and line not in norm:
                         norm.append(line)
             product = payload.get("product") or {}
@@ -3150,6 +3152,8 @@ class Handler(BaseHTTPRequestHandler):
                 p = pipe.project_new(product.get("name") or "一键成片")
             elif rep is None:
                 p["scripts"] = []      # 重新出方案 = 换一批候选，不在旧的后面叠加
+            if norm:
+                p["folders"] = norm     # 记住这次用的素材范围，分镜对齐只在这个范围里挑
             cfg = pipe.load_cfg()
             job = new_job("plan", 100)
 
@@ -3269,6 +3273,8 @@ class Handler(BaseHTTPRequestHandler):
             for f in folders:
                 for line in str(f).replace(";", "\n").splitlines():
                     line = line.strip().strip('"').strip("'")
+                    if line:
+                        line = os.path.normpath(line)   # 顺手把 // 与 ./ 这类写法归一
                     if line and line not in norm:
                         norm.append(line)
             product = payload.get("product") or {}
@@ -3287,6 +3293,8 @@ class Handler(BaseHTTPRequestHandler):
             p = pipe.project_load(payload.get("pid") or "")
             if not p:
                 p = pipe.project_new(product.get("name") or "一键成片")
+            if norm:
+                p["folders"] = norm
             cfg = pipe.load_cfg()
             job = new_job("direct", 100)
 
@@ -3328,6 +3336,8 @@ class Handler(BaseHTTPRequestHandler):
             for f in folders:
                 for line in str(f).replace(";", "\n").splitlines():
                     line = line.strip().strip('"').strip("'")
+                    if line:
+                        line = os.path.normpath(line)   # 顺手把 // 与 ./ 这类写法归一
                     if line and line not in norm:
                         norm.append(line)
             if not norm:
