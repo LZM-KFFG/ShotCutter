@@ -1,432 +1,195 @@
-# ShotCutter · 本地带货短视频流水线
+<div align="center">
 
-把「素材切片 → 打标 → 口播脚本 → 配音 → 分镜对齐 → 合成导出」串成一条五步向导。
-起一个本地服务、开一个网页就能跑完，素材不出本机。
+<img src="docs/images/home.png" alt="ShotCutter 首页" width="880">
 
-> 私有项目，仅供本人使用，未授权转载或商用。
+# ShotCutter · 短视频出片工具箱
+
+**把「长视频 → 切片 → 字幕 → 脚本 → 配音配乐 → 成片」串成一条本地流水线。**
+
+[![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?logo=windows&logoColor=white)](#)
+[![Local](https://img.shields.io/badge/100%25%20Local-No%20Cloud-2E7D5B)](#)
+[![License](https://img.shields.io/badge/License-MIT-C13B1B)](LICENSE)
+
+</div>
+
+> 素材、模型、成片全部留在本机，不上传云端。除了「在线曲库」和可选的大模型，其余功能断网也能跑。
 
 ---
 
-## 它能做什么
+## 这是什么
 
-打开 `http://127.0.0.1:8777/` 是启动台首页，功能分两块：
+一个跑在本机的 Web 工具集，浏览器就是界面。它不生产素材，只负责把**你手里的素材**整理成能发的短视频：
 
-- **工具板块**（处理现成素材）：`镜头切割器`（`/cutter`）、`字幕去除`（`/sub`，单文件版 VSR 前端）、`视频变高清`（`/hd`，video2x 超分 + RIFE 补帧）
-- **视频生成板块**（从素材到成片）：`一键出片`（`/one`）、`成片流水线`（`/pipeline`）
+- 一条 40 分钟的长视频，切成几百个镜头，挑出能用的
+- 一条带硬字幕的搬运素材，把字幕擦干净
+- 一条 720p 的老素材，放大到 4K 并补帧
+- 一堆口播 + 空镜，自动剪成十几条不同角度的成片
 
-| 环节 | 说明 |
+全部操作在 `http://127.0.0.1:8777` 完成，服务用 Python 标准库起，没有数据库、没有账号、没有云端队列。
+
+## 界面
+
+| 首页（目次） | 字幕去除（批量队列） |
 |---|---|
-| **切片** | `镜头切割器` 页用 PySceneDetect 按镜头切分长视频，导出到源目录下的 `镜头切片/`；流水线第 1 步扫描这些片段（整段视频也能直接加，会当作一个镜头），支持多文件夹、递归扫描、指纹去重；导出时可勾「去重后导出」，重复镜头只出一条 |
-| **去硬字幕** | 调本机 VSR（默认 `D:\Tools\VSR`）把烧进画面的字幕抹掉再进池：可选「自动检测」逐帧找字幕，或「固定底部区域」整块重绘（快很多）；支持整文件夹批量，也能只处理勾选的素材；处理完在卡片里直接列出结果，可单个下载、打包下载，也能一键「全部加入素材池」 |
-| **打标** | 先用 OpenCV 算亮度 / 色调 / 饱和度 / 细节 / 动态等视觉特征；接了视觉大模型后再加「场景 / 主体 / 动作 / 景别 / 氛围」语义标签，分镜匹配会准很多 |
-| **脚本** | 内置 **14 种口播角度**（痛点切入、对比实测、参数硬核、避坑提醒、场景代入、亲身自述、算账划算、问答答疑、口碑回购、开箱第一眼、用法教程、送礼场景、时令当季、反常识），按商品信息生成带停顿与镜头提示的口播稿 |
-| **配音** | edge-tts 逐句合成（默认 `zh-CN-XiaoxiaoNeural`，语速 +8%），拿每句真实时长；断网可切 Windows SAPI 兜底。「全部配音」一次把所有脚本配完，已配好的自动跳过 |
-| **分镜** | 装箱式对齐：按目标镜头时长把每句拆成 1~n 个镜头（受最短/最长镜头约束），再按语义标签打分挑素材；批量出片时每条用不同种子重新挑，同一脚本能出互不相同的版本 |
-| **合成** | ffmpeg 渲染 1080×1920 / 30fps / H.264 + AAC，ASS 字幕（微软雅黑、描边、底部留白）；支持 BGM 循环、淡入淡出、音量与限幅 |
-| **批量出片** | 脚本 × 版本一次排队（每个脚本最多 20 版），逐条显示进度；配音缺失自动补配，失败不影响其他条 |
-| **成片管理** | 列表显示时长 / 体积 / 码率 / 镜头数，点表头排序；多选打包 zip 下载；删除走回收站，不动原始素材 |
+| ![首页](docs/images/home.png) | ![字幕去除](docs/images/sub.png) |
 
-除「可选的云端大模型」和「edge-tts 在线合成」外，全流程在本机完成。
-
----
-
-## 环境要求
-
-- **Windows 10 / 11**（回收站删除、SAPI 兜底、后台常驻启动都用到 Windows API）
-- **Python 3.10+**（代码用了 `str | None` 这类新语法，开发和验证环境为 3.13）
-- **ffmpeg**：仓库不附带，见下面「安装」第 2 步
-- 可选：**llama.cpp** + 一个视觉模型（本地打标 / 本地写脚本，省钱且不联网）
-- 可选：**VSR**（Video Subtitle Remover，自带 Python + CUDA 版 torch）用于去硬字幕，默认路径 `D:\Tools\VSR`
-- 可选：能上外网（edge-tts 走微软在线接口；纯 SAPI 则不需要）
-
----
-
-## 安装
-
-**1. 建虚拟环境并装依赖**
-
-```bat
-cd /d D:\ShotCutter
-python -m venv .venv
-.venv\Scripts\pip install -r requirements.txt
-```
-
-**2. 放好 ffmpeg。** 仓库不附带二进制，但 `imageio-ffmpeg` 里有一份，复制到 `Scripts` 下即可（程序优先找 `.venv\Scripts\ffmpeg.exe`，其次找 PATH 里的 `ffmpeg`）：
-
-```bat
-.venv\Scripts\python.exe -c "import imageio_ffmpeg, shutil; shutil.copy(imageio_ffmpeg.get_ffmpeg_exe(), r'.venv\Scripts\ffmpeg.exe')"
-```
-
-**3. 验证**
-
-```bat
-.venv\Scripts\ffmpeg.exe -version
-```
-
-> 若系统里已有 ffmpeg 并想省掉这一步，把它的目录加进 PATH 也行；程序启动时会在日志里打印用的是哪一个。
-
----
-
-## 搬到别的电脑用（便携安装包）
-
-`.venv` 绑定了本机的 Python 路径，**不能直接拷**。正确做法是打包一份安装包：
-
-```bat
-.venv\Scripts\python.exe pack.py            :: 生成 dist\ShotCutter-portable
-.venv\Scripts\python.exe pack.py --zip      :: 顺便压缩成 zip
-.venv\Scripts\python.exe pack.py --refresh  :: 依赖升级后重下 wheel
-```
-
-产出的文件夹里包含：代码 + `web/` + 干净的 `pipeline.json` + `tools\ffmpeg.exe`
-+ `wheels\`（全部依赖的离线 wheel，含 GPU 的 cuBLAS/cuDNN）+ `安装.bat` / `启动.bat`。
-
-新电脑上只要：**装个 Python 3.12/3.13 → 双击 `安装.bat`（2~4 分钟，全程离线）→ 双击 `启动.bat`**。
-以后再换机器，整个文件夹拷过去、删掉 `.venv`、重新跑一次 `安装.bat` 即可。
-
-**连 Python 都不想装？用免安装版**（自带 Python 运行时，约 2.6GB），双击 `ShotCutter.exe` 即用
-（服务后台启动 + 自动开浏览器，网页页脚可「退出服务」；`ShotCutter.exe --stop` 也能停）：
-
-```bat
-.venv\Scripts\python.exe pack.py --only-embed        :: 生成 dist\ShotCutter-免安装（含 exe）
-.venv\Scripts\python.exe pack.py --only-embed --zip  :: 顺便压成 zip（约 1.2GB）
-```
-
-`ShotCutter.exe` 是桌面启动器（PyInstaller 打包，约 8MB）：双击 → 后台起服务 → 自动开浏览器 →
-自己退出；停止用网页页脚的「退出服务」或 `ShotCutter.exe --stop`。它**不**把 2.6GB 依赖塞进 exe
-（单文件每次启动都要解压几百 MB，又慢又容易被杀软误报），只负责找运行时、拉起服务、开页面。
-
-拷到新电脑 → 双击 `启动.bat` → 浏览器自动打开，**不需要装 Python、不需要联网**。
-`serve.bat` 可以让它后台常驻，关掉黑窗口也不停。
-
-> 免安装版用的是嵌入式 Python（隔离模式），包根目录靠 `python313._pth` 里的 `..` 暴露给解释器；
-> 打包脚本已处理，手改会坏。
-
-两个可选工具不随包附带，需要时单独放：
-
-| 工具 | 放法 |
+| 一键出片（方案卡） | 成片流水线（素材页） |
 |---|---|
-| 视频变高清（video2x） | 解压到 `tools\VideoUpscaler`，或把 `pipeline.json` 的 `upscale.root` 指向它 |
-| 字幕去除（VSR） | 解压到任意位置，把 `pipeline.json` 的 `desub.root` 指向它 |
+| ![一键出片](docs/images/one.png) | ![流水线](docs/images/pipeline.png) |
 
-两个路径都留空且找不到时，对应页面显示"未安装"，其它功能照常。
+## 核心能力
 
----
+### 工具
 
-## 启动
-
-| 方式 | 命令 | 特点 |
-|---|---|---|
-| 前台 | 双击 `start.bat`，或 `.venv\Scripts\python.exe app.py` | 黑窗口关掉即停，适合临时用 |
-| **常驻** | 双击 `serve.bat` | 用 `launch.py` 以脱离终端的方式起进程，窗口自动关闭，服务继续跑 |
-| 指定端口 | `.venv\Scripts\python.exe app.py 9000 --no-browser` | 默认 8777，被占用时自动往后找（最多 +20） |
-
-启动后浏览器会自动打开：
-
-- `http://127.0.0.1:8777/` —— **镜头切割器**（只做切片，快速试参数）
-- `http://127.0.0.1:8777/pipeline` —— **流水线**（五步向导，主界面）
-
-> 页面上有改动看不到时按 **Ctrl+F5** 强制刷新；旧页面跑的是旧 JS。
-
----
-
-## 五步流程
-
-| 步骤 | 你要做的 | 产出 |
-|---|---|---|
-| **1 素材** | 粘文件夹路径（可多行）→ 扫描加入 → 打标；有硬字幕的先用上方「去硬字幕」卡片处理 | `_work/pipe/pool.json` 素材池 + 缩略图 |
-| **2 脚本** | 填品名 / 受众 / 卖点 / 痛点 / 价格 / 信任点，勾选角度 → 生成 | `project.json` 里的 scripts（含每句的镜头提示） |
-| **3 配音** | 点「生成配音」，逐句合成并试听 | `audio_N.wav` + 每句起止时间 |
-| **4 分镜** | 点「自动对齐」，按语义标签给每句挑镜头 | 镜头清单 CSV + ASS 字幕 |
-| **5 成片** | 渲染导出；需要多个版本就「批量出片」 | `_work/pipe/out/*.mp4` + 同名 sidecar `.json` |
-
-**素材池的两个细节**：同一段素材按「路径 + 起止时间」指纹去重，重复扫描不会重复加入；多选模式下可全选 / 反选 / 只选未打标，然后批量删除。
-
-**批量出片**：选好脚本和版本数（如 2 条脚本 × 3 版本 = 6 条，版本可选 1~20），每条用不同随机种子重新挑镜头，文件名带 `_V1` `_V2` 区分；某条缺配音会自动补，失败的会列出来不影响其他条。
-
-**长任务随时能停**：扫描素材、打标、写稿、配音、合成、去字幕、批量出片跑起来后，右上角都会浮出一个控制条
-（暂停 / 继续 / 停止）。暂停在当前这一条做完后生效，已完成的不会重做。
-
-停止的力度分两种：**能立刻断的**——去字幕杀掉 VSR 进程、合成杀掉 ffmpeg 进程，1~2 秒内停住且不留半成品；
-**要等当前的**——写稿是分批请求大模型、配音是一次在线合成，点停止后等这次请求返回（十几秒到半分钟）就收手，
-写稿已经写完的批次会保留下来（提示「已停止：保留了已生成的 N 条」）。
-
-**去字幕的产物怎么复用**：跑完卡片底部会出现列表（已去字幕 N 个 / 共多少 MB），每个文件可单独下载，
-也可以「打包下载」拿 zip 留档；「全部加入素材池」会把 `_work/pipe/desub` 里所有成品补进素材池（已存在的跳过），
-所以重跑同一批、或者素材池被清空后，都能一键找回，不用重新跑 VSR。
-
-**BGM**：设置页里可选「不加 / 随机 / 指定」，音乐库支持多个目录；合成时用 `-stream_loop -1` 循环、`afade` 淡入淡出、`amix=normalize=0` + `alimiter`，保证人声不被压小、也不削波。
-
----
-
-## 一键出片
-
-上面五步是「先写稿再找画面」，一键出片把它反过来，也补上了正面那条路。
-它现在是**独立页面**，和「镜头切割器」「成片流水线」平级：顶部导航「⚡ 一键出片」或直接开
-`http://127.0.0.1:8777/one`，**不依赖流水线就能跑完整个闭环**：素材 → 出方案 → 渲染 →
-调 BGM / 字幕字号（设置里）→ 成片就地播放 + 体检分数 + 删除下载。
-**两种素材都能丢**。素材文件夹不用手动复制路径：
-**直接把文件夹拖进输入框**，或点「选择文件夹」。
-
-拖拽有个浏览器限制：拖入的文件夹只有名字、没有完整路径（Chrome 不给）。
-所以拖进来后端会先把名字变成真实路径——先在上次用过的目录附近找同名目录，
-找不到就浅扫各盘符（深度 3，限时 6 秒，跳过系统目录）；实在定位不到就自动弹原生选择框，
-选中一次之后，下次拖拽就能顺着这个位置直接命中。三个目录框（一键出片 / 分步加入素材 / 去硬字幕）都支持。
-
-| 路线 | 什么时候走 | 声音从哪来 | 前置 |
-|---|---|---|---|
-| **A 原声直剪** | 素材里有人说话（达人讲解、直播回放） | 从素材里剪出来，只裁不改 | `pip install faster-whisper` |
-| **B AI 写稿配音** | 素材是纯空镜，或口播不够撑起一条 | 大模型写稿 + edge-tts | 无（跟原来五步一样） |
-
-选「自动」时按这条线判：**口播可用时长 ≥ max(8s, 目标时长 × 0.5) 走 A，否则走 B**。
-也可以在下拉里强制指定。两条路的产出都能进「成片」页，也都能批量变体、暂停停止、换镜头、改字幕。
-
-```
-A：体检分流 → 转写口播 → 顺稿 → 按品名卖点挑句 → 剪掉废话拼成人声轨 → 分镜配画面 → 渲染
-B：打标空镜 → 大模型写稿（14 角度里挑一种）→ 逐句配音 → 分镜配画面 → 渲染
-```
-
-**实现上的取巧**：A 路线剪出来的人声轨会被包装成和 edge-tts 一样的结构（`tts.audio` + `tts.sentences`），
-所以 `align` / `build_ass` / `compose_worker` / `batch_worker` **一行都没改**就吃下了它——
-两条路最终在同一条下游合流，这也是为什么一键出来的片照样能走批量。
-
-### 两段式：先出方案，你挑完才渲染
-
-按钮是「出方案」而不是「一键出片」——**先出稿子给你看，点了「渲染」才真烧 CPU**。
-
-```
-出方案（体检 → 转写 → 挑句，不渲染）→ 一排方案卡 → 点某张卡的「渲染」→ 出片
-                                        ├ 重挑：换一套挑法重出这一条
-                                        └ 全部渲染：一次出完
-```
-
-每张卡上有：时长、句数、走的是原声还是 AI 配音、来源素材、前三句原文、推荐理由；
-B 路线的卡如果出现**商品信息里没有的数字**（模型爱编参数），会直接用红色标出来。
-
-为什么值得多这一步：现在的 A 路线是「从素材里摘话」，摘得好不好只有看到成片才知道。
-方案卡把稿子提前摆出来，不满意点「重挑」，比渲染完再回头删句子省事得多。
-
-**重挑一定有变化**：优先换一套挑法（`seed`）+ **排除上一版用过的句子**。
-如果这条素材的句子第一版就全用完了（实测一条 25 秒的素材只有 8 句，一版就吃完），
-排除后凑不出目标时长，就会**自动改走 B 路线换一个角度**，并在卡片上写明「改用 AI 写稿换了个角度」——
-不会出现「点了没反应」。
-
-### 什么素材适合哪条路（实测 20 段直播素材）
-
-| 路线 | 判断依据 | 实测占比 |
-|---|---|---|
-| **A 原声直剪** | 有口播、能转出 ≥4 句完整话 | 4 / 20 |
-| **B AI 写稿配音** | 其余全部（纯画面、只有音乐、句子太碎） | 16 / 20 |
-
-A 路线适合「达人讲产品」的素材（讲解、测评、带货话术）；**教程、做菜、vlog 类不适合**——
-实测一段炒菜教程里 8 句有 3 句是「油热下五花肉/老抽料酒/翻炒均匀」，被当成卖点选进了成片。
-
-### 批量出片（一次丢一堆素材）
-
-素材文件夹可以填多行，「出几条」填 N，一次出 N 条：
-
-- **一个能用的口播素材 = 一条原声片**。转写只做一遍，N 条共用，不会每条重转。
-- 口播素材不够 N 条时，剩下的用 **B 路线**补，角度自动轮换（痛点 / 参数 / 避坑…）。
-- 同一素材被复用时会换一套挑法（seed），不会出两条一模一样的。
-- **单条失败不拖垮整批**：最后报「出片 x/N 条，y 条失败」，失败的可以单独重跑。
-- **数字核查**：B 路线的稿子会编具体参数（实测编出「每 100 克泡发后能涨到 320 克」），
-  凡是商品信息里没有的数字都会被标出来（`check_numbers`），播前自己核一遍。
-
-实测一批（8.mp4 + 10.mp4 + 一段纯音乐素材，要 3 条）：计划 `原声 2 / 配音 1`，
-出 25.6s + 21.4s + 20.1s 三条，0 失败；纯音乐那条没被当成口播，自动转成了 B。
-
-### 成片体检（出片后自动跑一遍）
-
-成片渲染完会自动体检，结果按 `mtime + size` 缓存在 `_work/pipe/qc/`，成片列表里直接显示分数
-（`92分` 绿色=通过、橙色=有建议、红色=有问题，点徽标切到那条看详情）。也能手动「体检这条」/「体检所选」/「全部体检」。
-
-查的是「人眼要盯、但机器更准」的几项：
-
-| 项 | 怎么查 | 判红线的依据 |
-|---|---|---|
-| 黑边 | `cropdetect`（一次解码取众数） | 任意一边黑掉 >2% 提醒，>8% 报错 |
-| 首尾黑场 | `blackdetect` | 片头/片尾黑 >0.4s（第一镜没对上起点、delogo 抹成黑块） |
-| 字幕超宽 | 读烧进画面的 ASS，按字号估每行宽度 | 超安全区（1080 宽留 60+60 边距）报错，超 8% 直接判坏 |
-| 静音断档 | `silencedetect` + **字幕间隔** | 开头静 >0.8s、中间断 >1.2s；BGM 会盖住音频静音，所以同时看字幕空档 |
-| 音量 | `loudnorm` 量响度和真峰值 | -22 ~ -12 LUFS 之外提醒、峰值 >-0.8 dBTP 有削波风险 |
-| 码率 | 体积/时长 | 1080×1920 低于 1800kbps 提醒 |
-| 字幕节奏 | ASS 时间轴 | 首句 >1s 才出、句停留 <0.7s、字幕超出片尾、单屏 >3 行 |
-
-评分：100 起步，一条问题扣 22、一条建议扣 8。**这些项都验证过**：用 ffmpeg 造了带黑边、加 18dB、
-去掉音轨、开头 3 秒静音的样本，全部能判出来（实测现有成片里 A 路线原声片普遍 -11 LUFS 偏响，
-B 路线配音片 -18.5 LUFS 正常）。
-
-### A 路线的几条实测经验
-
-- **判定要有长度下限**（`AROLL_MIN_DUR = 6s`）。不设的话 1~2 秒的镜头切片里 `silencedetect`
-  找不到停顿，有声占比算出来 100%，整池切片会全被判成「口播」。
-- **一句一镜**：原声直剪时画面和口型是同步的，一句被拆成两个镜头、第二镜从别的原片里挑，
-  嘴型立刻对不上。所以 `align_cfg()` 会把目标镜头时长抬到 5.5s 以上，让 align 不再拆句。
-- **热词偏置**：品名和卖点会自动塞进转写的 `initial_prompt`，直播里「秋木耳」「泡发」这类词听岔的概率明显下降。
-- **顺稿只换字不改内容**：让大模型修错别字和标点，但逐句校验「内容字符数差 ≤2 且相似度 ≥0.65」。
-  实测模型会把下一句开头的几个字挪到上一句凑通顺，那样字幕比语音多几个字，音画直接对不上，必须挡掉。
-- **转写默认走 CPU**：Windows 上 CT2 用显卡要 cuBLAS 12 + cuDNN 9 的 DLL，缺了会报
-  `cublas64_12.dll is not found`。想用显卡就装好这两个，再把 `director.asr_device` 设成 `cuda`。
-- **下模型被代理掐**（报 502）：转写会先清掉系统代理再下，和 edge-tts 一样；
-  国内网络加一条 `director.asr_hf_endpoint = https://hf-mirror.com` 更快。
-- **源片自带硬字幕**是两条路线共同的坎：直播素材常把字幕烧在画面上。
-  两个办法：① 配 `director.delogo`（格式 `x:y:w:h`，按**输出画布**给，例如 `80:360:920:120`），
-  渲染时逐镜用 ffmpeg `delogo` 抹掉——实时速度（2 秒片约 1.4 秒），但**背景静止时几乎看不出、
-  镜头里有人或物体穿过字幕区会拉丝**；② 第 1 步的 VSR 去字幕，干净但极慢（34 秒片 6 分钟没跑完）。
-  急着出片用 ①，要交付精品用 ② 。
-- **每一刀要有唯一指纹**（`cut_token`）。早先所有原片共用「原片」一个标签，池子里有多刀时
-  `_candidates` 会把所有原片都算候选、随机挑一个，画面和语音立刻错位（口型对不上、
-  源片自带的硬字幕也跟着不对）。现在按「路径+起止」算指纹，align 只会挑回它自己那一刀。
-- **派生的原片不参与分流**：从口播里切出来的片子打个 `原片` 标签，`classify` 会跳过它们。
-  不跳的话第二次跑同一批素材，会把同一句话当成新素材再转录一遍（实测 8 句变 64 句）。
-- **字幕统一去标点**：转写出来的句子有的被顺稿加了标点、有的被挡下保持原样，不统一会很扎眼。
-  竖屏字幕本来也不需要句号逗号，断行交给换行就行。
-- **转写幻觉会伪装成台词**：没人说话的片段（纯音乐、环境音）上，whisper 会把 `initial_prompt`
-  原样吐出来，实测能一字不差返回「这段话在讲东北黑木耳、肉厚无根、泡发快、干净无沙。」，
-  还会把它念三遍。这种句子进成片就是「没声音的画面 + 一行假字幕」，现在会按提示词前缀和重复片段过滤掉。
-- **B 路线默认只写一个角度**（`director.b_angle`，默认 `pain` 痛点切入）。14 个角度全写要 5 批请求、
-  三五分钟，一键出片等不起；要换角度就改这个配置。
-- **时长不够会自动补句**：让模型一次吃满目标时长很难（实测目标 30 秒只给 16 秒）。
-  现在挑完会算一遍总时长，不足 `目标×0.8` 就补**已选句子的前后邻句**——原片里它们是连着说的，
-  接上去叙事不断；跨段乱补会变成「跳着说话」。实测 1.mp4 从 19.9s 补到 27.3s、8.mp4 从 16.5s 补到 25.6s。
-- **变体上限取决于素材**：A 路线每版会重新挑句，但同一批素材只有 8 句可用时，
-  V1/V3 很可能挑出同一组（实测就撞了）。要真正多条不同，得给更多素材，或者走 B 路线换角度写稿。
-
-几个通用约定：
-
-- **按目录圈定**：一键模式只体检你填的那几个文件夹，不会把整个池子（几百条）重扫一遍。
-- **切句不重排**：摘出来的句子一律保持原来的先后顺序，重排会让口播听着跳帧。想前置钩子要自己剪。
-- **空镜比例**：`0` 全用原片画面（口型对得上，但同一机位容易闷）、`0.5` 隔一句插一个空镜（默认）、`1` 尽量用空镜。
-  **开头钩子和结尾 CTA 永远保留原片**——这两处观众在盯人脸，切走会觉得很怪。
-- **画面提示词**：大模型挑句时会顺手给每句写一个 `visual`（景别/主体/动作），并从空镜已有的标签里选词，
-  所以空镜先打过标匹配才准（没配视觉模型就自动全用原片）。
-- **乱码句会跳过**：转写一定有错字，提示词里明确要求「读起来不通的句子一律不选」，宁可少一句。
-- **补旁白**（默认关）：A 路线剪出来只有 15 秒、你选了 45 秒时，勾上会用 TTS 补一两句接在最后。
-  音色和原声不是一个人，听起来是「达人讲完，解说接一句」，介意就别开。
-
-常见失败：`没装转写引擎` → 装 faster-whisper；`一条都没转写成功` → 看日志第一条报错，多半是音轨格式怪或模型没下完；
-**B 路线画面跑题** → 没配视觉模型的空镜没有标签，只能随机挑，配一个能看图的模型（或先把素材在五步流程里打标）就好了。
-
----
-
-## 设置项
-
-设置页保存到根目录 `pipeline.json`（**不入库**，含本机路径）。没有这个文件时全部走代码里的默认值。
-
-| 分组 | 关键字段 |
+| 模块 | 能做什么 |
 |---|---|
-| `llm` | `base_url` / `api_key` / `model` / `vision_model`：任意 OpenAI 兼容接口；`local_dir` / `local_port` / `local_extra`：本地 llama.cpp 一键启停 |
-| `tts` | `engine`（`edge` / `sapi`）、`voice`、`rate`、`gap` |
-| `video` | `w` `h` `fps` `crf` `preset` `fit`、镜头时长 `shot` / `min_shot` / `max_shot`、字幕 `subtitle` `sub_font` `sub_size` `sub_margin` `sub_outline` `sub_max_chars`（单行字数上限，超出自动拆条）、封面黄字幕 `hook` `hook_text`（留空自动）`hook_dur` `hook_size`（0=跟随字幕） |
-| `video.bgm*` | `bgm_mode`（none / random / one）、`bgm_dirs`、`bgm_volume`、`bgm_fade` |
-| `desub` | `root`：VSR 安装目录，默认 `D:\Tools\VSR`；里面要有 `Python\python.exe` 和 `resources\backend` |
+| **镜头切割器** | PySceneDetect 四种检测器（内容 / 自适应 / 直方图 / 感知哈希），调阈值和最短镜头后切分；**无损流拷贝**（几秒完成、画质零损失）或**逐帧精确**；拖拽/多选批量摄入，画面指纹去重，导出到源目录 `镜头切片/` |
+| **字幕去除** | 接本机 [VSR](https://github.com/YaoFANGUK/video-subtitle-remover) 擦除硬字幕；抽一帧预览后**直接在画面上拖框**罩住字幕，也有底部 30% / 顶部 30% / 全帧自动三个预设；**批量队列**一次挑多个视频串行处理，区域按各视频自身分辨率换算，跑完自动接下一个 |
+| **视频变高清** | 接本机 [video2x](https://github.com/k4yt3x/video2x)；超分模型（Real-ESRGAN / Real-CUGAN / libplacebo 等）+ RIFE 补帧，倍数、编码器（NVENC）、画质可调，进度与日志实时回显 |
 
-**本地模型**：设置页「一键启动」会调用 `llama-server.exe`，优先挑「目录里有同族 `mmproj` 的模型」，`mmproj` 按族名配对（`Qwen3-VL-30B-A3B-…` 只配 `…-mmproj-…`，不会配给 `Qwen3-Coder`），端口默认 9931；启动后会真发一张小图验证「能不能看图」。默认参数 `-c 8192 -ub 512 -cmoe --moe-cache-mib 7000 --parallel 1` 是实测比较稳的组合（`--parallel 1` 没写会自动补：多槽会让 MoE 的每个请求都掉到 1~2 tok/s）——**不要手写 `-ngl` 把显存塞满**，那样会触发 CPU 回退，速度掉到几十分之一。热缓存下次启动约 4 秒。
+### 生成
 
----
+| 模块 | 能做什么 |
+|---|---|
+| **一键出片** | 丢一堆素材 → 自动体检分流（口播 / 空镜）→ faster-whisper 转写 → 挑句 → 重算时间轴 → 按句配画面 → 出 3 条不同方案。**A 路线原声直剪**（不改句子顺序、一句一镜、口型对齐），**B 路线 AI 写稿配音**（14 种带货角度）。支持素材体检与**临时排除**、字幕预览、黄色标题字幕可调、BGM 曲库与混音试听、随时停止 |
+| **成片流水线** | 五步手动挡：素材池（指纹去重、画面打标、批量移出）→ 脚本（分镜表逐句编辑）→ 分镜 → 配音 / BGM → 渲染。渲染完自动成片体检（黑边、字幕超宽、静音段、音量、首尾黑场、码率），成片列表支持多选打包下载、批量体检、批量删除 |
+
+### 通用
+
+- **BGM 曲库**：本地目录扫描 + 曲名搜索 + 行内试听 / 混音试听（用当前脚本配音混 20 秒）；**在线找曲**接 [Incompetech](https://incompetech.com/music/royalty-free/)（Kevin MacLeod，CC-BY 4.0），一键下载入库并自动生成署名对照表
+- **字幕**：长句自动拆成多条单行字幕（优先在标点处断），渲染前可预览任意时刻画面，黄色标题字幕的文案 / 时长 / 字号 / 开关都能改
+- **随时停止**：出方案、渲染、去字幕都能中断，已完成的产物保留
+- **纸墨朱砂主题**：暖纸底 + 衬线标题 + 等宽数字，视频区一律进暗色「暗版」，长时间盯屏不刺眼
+
+## 快速开始
+
+**环境要求**：Windows 10/11、Python 3.12 或 3.13、ffmpeg。
+
+```bat
+git clone https://github.com/LZM-KFFG/ShotCutter.git
+cd ShotCutter
+install.bat        :: 建 .venv + 装依赖（首次 3~8 分钟）
+启动.bat            :: 启动服务并打开浏览器
+```
+
+默认地址 `http://127.0.0.1:8777`；端口被占用时会自动往后顺延，实际端口看控制台。
+
+**ffmpeg 放哪**：程序会依次找 `.venv\Scripts\ffmpeg.exe`、`tools\ffmpeg.exe`、项目根目录，最后找 PATH。最省事的做法是把 `ffmpeg.exe` 拷进 `.venv\Scripts\`。
+
+## 可选组件
+
+这三个都不装也能用，装了对应页面才会亮：
+
+| 组件 | 用途 | 怎么接 |
+|---|---|---|
+| **VSR** | 字幕去除 | 下载 [video-subtitle-remover](https://github.com/YaoFANGUK/video-subtitle-remover)，把路径填进 `pipeline.json` 的 `desub.root`（指向含 `Python\python.exe` 和 `resources\run_with_area.py` 的目录） |
+| **video2x** | 视频变高清 | 同上，填 `upscale.root`（指向含 `tools\video2x.exe` 的目录）；也可以直接把文件夹放到 `tools\VideoUpscaler` |
+| **本地大模型** | 写稿 / 挑句 | 用 [llama.cpp](https://github.com/ggml-org/llama.cpp) 起一个 OpenAI 兼容服务，在页面「设置」里填地址和模型名 |
+
+> 没有 NVIDIA 显卡也能跑：转写会自动回落 CPU（速度约为 GPU 的 1/4），字幕去除与视频变高清会提示缺少引擎。
+
+## 换电脑 / 打包
+
+```bat
+.venv\Scripts\python.exe pack.py --exe          :: 便携安装包（需先装 Python，约 1.5GB）
+.venv\Scripts\python.exe pack.py --only-embed   :: 免安装版（自带 Python 运行时，约 2.6GB）
+```
+
+- **便携安装包**：新电脑装好 Python 后双击 `安装.bat`，1 分钟离线装完
+- **免安装版**：连 Python 都不用装，双击 `ShotCutter.exe` 直接起服务并打开浏览器；退出用网页页脚的「退出服务」或 `ShotCutter.exe --stop`
+
+两个包都**不带** `_work`（素材池、项目、成片），也不带 VSR / video2x 这两个体积很大的可选工具。
+
+## 工作原理
+
+```
+浏览器（原生 HTML/CSS/JS，无框架）
+        │  HTTP  127.0.0.1:8777
+        ▼
+app.py ── 路由 / 任务队列 / 文件选择 / 静态文件 / 退出管理
+   ├── pipeline.py      素材池、分镜脚本、字幕、渲染、BGM、成片体检
+   ├── director.py      一键出片：体检分流 → 转写 → 挑句 → 时间轴 → 画面匹配
+   ├── qc.py            成片体检规则
+   └── vsr_runner.py    字幕去除的命令行封装
+        │
+        ├── ffmpeg / ffprobe        切、拼、混音、烧字幕、抽帧
+        ├── PySceneDetect           镜头检测
+        ├── faster-whisper          口播转写（GPU 优先，CPU 兜底）
+        ├── edge-tts                AI 配音
+        ├── VSR（可选）              硬字幕擦除
+        └── video2x（可选）          超分 + 补帧
+```
+
+一键出片的核心思路是「**先定声音，再配画面**」：先把口播整理成一条干净的人声轨，画面、字幕都围绕这条音轨编排。原声路线里每个切点都有「文件 + 起止时间」的指纹，画面只能挑回它自己那一刀，所以口型和源片硬字幕不会错位。
+
+## 配置
+
+`pipeline.json` 第一次保存设置时自动生成（含本机路径，已加入 `.gitignore`）。几个常用的：
+
+| 段 | 键 | 说明 |
+|---|---|---|
+| `video` | `w` `h` `fps` `crf` `preset` | 输出画幅与编码质量 |
+| `video` | `sub_size` `sub_margin` `sub_max_chars` | 字幕字号、距底边比例、单行字数上限 |
+| `video` | `hook` `hook_text` `hook_dur` `hook_size` | 黄色标题字幕的开关、文案、时长、字号 |
+| `video` | `bgm_dirs` `bgm` `bgm_vol` | BGM 目录、默认曲目、音量 |
+| `director` | `asr_model` `asr_device` `asr_compute` | 转写模型与设备（`cuda` / `cpu`） |
+| `desub` / `upscale` | `root` | 可选工具路径 |
 
 ## 目录结构
 
 ```
 ShotCutter/
-├─ app.py            # 后端：标准库 http.server，页面路由 + JSON 接口 + 任务轮询 + Range 视频流
-├─ pipeline.py       # 流水线：切片 / 打标 / 写稿 / 配音 / 对齐 / 合成 / 批量 / 打包
-├─ director.py       # 一键导演：体检分流 / 转写 / 挑句 / 造人声轨（产出伪装成 tts 交给 pipeline）
-├─ qc.py             # 成片体检：黑边 / 字幕超宽 / 静音断档 / 音量 / 首尾黑场 / 码率
-├─ launch.py         # 脱离终端常驻启动（DETACHED_PROCESS + CREATE_BREAKAWAY_FROM_JOB）
-├─ vsr_runner.py     # 驱动 VSR 去字幕（按次切换检测开关、兜住空检测的崩溃）
-├─ start.bat         # 前台启动
-├─ serve.bat         # 双击 = launch.py
-├─ requirements.txt
-├─ web/
-│  ├─ index.html     # 镜头切割器（单页）
-│  ├─ one.html       # 一键出片（独立单页，出方案 → 挑 → 渲染 → 出片结果）
-│  └─ pipe.html      # 流水线五步向导（单页）
-├─ samples/          # 示例素材（一段含 8 个镜头的长视频 + 切好的 8 个镜头）
-├─ README.md
-├─ pipeline.json     # 本机配置（运行时生成，不入库）
-└─ _work/            # 全部运行产物（不入库）
-   ├─ pipe/pool.json             # 素材池
-   ├─ pipe/projects/<id>/        # 项目：project.json、sub_N.ass、shotlist_N.csv、audio_N.wav
-   ├─ pipe/out/*.mp4 + .json     # 成片与 sidecar 记录（时长、体积、码率、镜头数、BGM）
-   ├─ pipe/qc/<md5>.json         # 成片体检结果（按 mtime+size 失效，删成片不用管）
-   ├─ pipe/desub/                # 去字幕产物（*_no_sub.mp4 + index.json 记录源→输出）
-   ├─ pipe/zip/                  # 批量下载打包结果（保留最近 8 个 / 6 小时）
-   └─ thumbs/                    # 素材缩略图
+├─ app.py            HTTP 服务与全部接口
+├─ pipeline.py       素材池 / 分镜 / 字幕 / 渲染 / 体检
+├─ director.py       一键出片导演
+├─ qc.py             成片体检
+├─ vsr_runner.py     字幕去除封装
+├─ launch.py         启动入口（找端口、开浏览器）
+├─ launcher.py       桌面启动器（打包成 exe）
+├─ pack.py           打包脚本（便携版 / 免安装版）
+├─ web/              六个页面（home / index / sub / hd / one / pipe）
+├─ samples/          演示素材
+├─ docs/images/      README 截图
+├─ install.bat       首次安装
+├─ 启动.bat           日常启动
+└─ requirements.txt
 ```
 
----
+## 技术栈
 
-## 数据安全
-
-- **素材只读**：切片、对齐、合成都不改动源文件。
-- **删成片不删素材**：只删该条 mp4、sidecar、对应的字幕/分镜表和配音，且走 **Windows 回收站**（`FOF_ALLOWUNDO`），删错能捞回来。
-- **共用项目不误删**：一个项目里有多条成片时，删其中一条不会动 `project.json` 和其他条的分镜文件。
-- **项目记录不随成片消失**：删光成片后仍可回到第 2/3 步改脚本重出；万一记录丢了，前端会按页面上的脚本自动重建项目，并把刚才的请求重发一次。
-- **不外传**：素材、脚本、成片都在本机；只有 edge-tts 会把「要合成的文字」发给微软接口，介意就切 SAPI 或本地 TTS。
-
----
+| 层 | 用的什么 |
+|---|---|
+| 后端 | Python 3.13、标准库 `http.server`（没有 Flask / FastAPI，依赖少、启动快） |
+| 前端 | 原生 HTML + CSS + JavaScript，零构建、零框架 |
+| 视频 | ffmpeg / ffprobe |
+| 检测与识别 | PySceneDetect、faster-whisper（CTranslate2） |
+| 语音 | edge-tts |
+| 可选 | VSR（PyTorch + ONNX Runtime）、video2x（Vulkan / RIFE） |
 
 ## 常见问题
 
-| 现象 | 处理 |
-|---|---|
-| 页面弹「连不上本地服务 / Failed to fetch」 | 服务进程没了。双击 `serve.bat` 重新起，再刷新页面 |
-| 改了页面没反应 | Ctrl+F5；旧标签页仍在跑旧 JS |
-| 批量下载失败 | 先确认服务活着；打包是同步的，几十条会等几秒 |
-| 报「未找到 ffmpeg」 | 按安装第 2 步把 ffmpeg 复制到 `.venv\Scripts\`，或把系统 ffmpeg 加进 PATH |
-| 本地模型很慢（< 5 tok/s） | 多半是启动参数把显存占满触发了 CPU 回退，去掉 `-ngl`，用默认 `local_extra` |
-| 打标很慢 / 一直卡在同一条 | 本地模型是**串行**跑的，约 5 秒一张（435 张约 35~40 分钟），每 8 张落一次盘，中途刷新页面不会白跑。想快就换云端视觉 API，会自动 4 路并发 |
-| 点「生成脚本」提示「本地模型 N 秒内没返回」 | 模型被别的任务占满了（以前打标 4 路并发就会这样）。现在打标已串行、服务端单槽，一般不会再撞；等打标结束再点即可 |
-| 重启 ShotCutter 后本地模型不见了 | 模型是服务拉起来的子进程，重启服务会一起退出，再点一次「启动本地模型」即可（约 12 秒） |
-| 启动模型报 `mismatch between text model (n_embd=…) and mmproj (n_embd=…)` | 选的主模型和 `mmproj` 不是同一系列（例如 Qwen3-Coder 配了 Qwen3-VL 的投影层）。现在程序会先按族名配对，配不上就不加 `--mmproj`，启动失败时还会自动去掉它重试一次（退化成纯文本）。想看图就换回同系列 VL 模型 |
-| 生成的视频在某些播放器打不开 | 导出统一 H.264 / yuv420p，兼容性最好；若素材本身是 HEVC，浏览器预览可能不支持，但成片没问题 |
-| 配音没声音 / 报错 | edge-tts 需要联网；断网时在设置里把引擎切成 `sapi` |
-| 去字幕提示「没找到 VSR」 | 路径不对：改 `pipeline.json` 的 `desub.root`，指向含 `Python\python.exe` 的那一层 |
-| 去字幕很慢 | 正常：STTN 逐帧重绘，1080×1920 约 2~5 帧/秒。想快就用「固定底部区域」，它跳过逐帧检测 |
-| 去字幕后画面糊成一片 | 「固定底部区域」的上下左右填大了，框到了画面主体；缩小到只盖住字幕那一条 |
-| 端口被占用 | 程序会自动往后找端口，看启动日志里的实际地址 |
+**提示「没装转录引擎 faster-whisper」**
+九成是用了系统 Python 启动，而不是项目的 `.venv`。用 `启动.bat`（或 `.venv\Scripts\python.exe app.py`）就不会。
 
----
+**字幕去除看起来在用 CPU**
+Windows 任务管理器的 GPU 图默认显示 3D 引擎，CUDA 工作在另一个引擎里。切到「Cuda / Compute」看，或者看 `nvidia-smi`。页面头部与任务日志第一行都会打印实际用的设备。
 
-## 接口速查
+**抽帧是黑的 / 抽不出帧**
+多半是素材本身没下载完整（判据：体积 ≈ 时长 × 码率 ÷ 8）。程序会自动退到能解码的时间点并提示「已用 X 秒的画面」，残片建议重新导出。
 
-后端是纯标准库 `http.server`，没有框架依赖。任务类接口返回 `{"job": "<id>"}`，前端轮询 `/api/job?id=` 拿 `state` / `progress` / `message`。
+**端口被占用**
+服务会从 8777 往后找可用端口，控制台会打印实际地址。
 
-| 方法 | 路径 | 作用 |
-|---|---|---|
-| GET | `/api/pipe/pool` `/config` `/projects` `/outputs` `/angles` | 读状态 |
-| GET | `/api/pipe/out?name=` `/thumb?id=` `/audio?pid=&idx=` | 成片 / 缩略图 / 配音（支持 Range，可拖动进度） |
-| POST | `/api/pipe/plan` | **出方案**（不渲染）：`{folders, product, mode, target, count, visual_mix, use_llm, topup}`；重挑加 `{pid, replace_idx, seed0}` |
-| POST | `/api/pipe/render` | **按方案渲染**：`{pid, idxs:[0,1]}`，单条失败不影响其它 |
-| POST | `/api/pipe/direct` | 一步到位（出方案 + 渲染）：`{folders, product, mode, target, variants, visual_mix, use_llm, topup}`，`mode`=auto/source/script |
-| POST | `/api/pipe/scan` | 扫描文件夹，把视频 / 已切好的片段加入素材池（`folders` 支持数组） |
-| POST | `/api/pipe/tag` | 打标（`force` 为全量重打） |
-| POST | `/api/pipe/script` | 生成口播稿 |
-| POST | `/api/pipe/tts` `/align` `/compose` | 配音 / 分镜对齐 / 合成 |
-| POST | `/api/pipe/batch` | 批量出片 |
-| POST | `/api/pipe/output/zip` `/output/delete` | 打包 / 删除成片 |
-| GET | `/api/pipe/qc?name=&force=1` | 单条成片体检（`force` 忽略缓存重跑，约 2s） |
-| GET | `/api/pipe/bgm/preview?bgm=&vol=&fade=&pid=&idx=&dur=` | BGM 混音试听：配音轨 + BGM 按当前音量混 `dur` 秒（默认 20s），滤镜链与合成完全一致，结果缓存在 `_work/bgm_prev/` |
-| GET | `/api/pipe/bgm/list` `/bgm/audio?path=` | 曲库列表（名称/时长/大小/目录）/ 流式播放某一首 |
-| GET | `/api/pipe/bgm/online/search?q=&refresh=1` | 在线曲库搜索（incompetech 1400+ 首，CC-BY 4.0，目录缓存一天） |
-| GET | `/api/pipe/bgm/online/audio?fn=` | 在线曲目流式代理（透传 Range，供浏览器试听） |
-| POST | `/api/pipe/bgm/online/download` | `{fn}` 下载入库到第一个音乐文件夹，并维护「BGM 署名对照.txt」 |
-| POST | `/api/pipe/qc` | 批量体检：`{names:[...], force}`，进度走 `/api/job` |
-| POST | `/api/pipe/resolve` | 拖拽目录解析：`{names:["原片"], known:[...]}` → `{found:{原片:["D:\\...\\原片"]}}` |
-| POST | `/api/job/control` | 长任务控制：`{id, action: stop\|pause\|resume}` |
-| POST | `/api/export` | 导出选中片段：`{items:[{token,keep}], mode: copy\|recode, out_dir, dedup: conservative\|normal\|aggressive}`；`dedup` 为空即原样导出，去重报告在 `job.dedup` |
-| POST | `/api/pipe/desub` | 去字幕（`folders` 或 `ids`，`mode`=auto/box，`box`=上下左右百分比） |
-| POST | `/api/pipe/llm/start` `/llm/stop` | 本地模型启停 |
-| GET | `/api/hd/info` `/hd/status` | 视频变高清：引擎/GPU 探测、任务状态（帧/fps/ETA/日志） |
-| POST | `/api/hd/probe` `/hd/start` `/hd/cancel` | 高清：读视频信息 / 启动（`processor`/`model`/`factor`/`interp_factor`/`codec`/`quality`）/ 取消；输出到 `D:\VideoUpscaler\output` |
-| GET | `/api/sub/info` `/sub/status` `/sub/frame?path=&t=` | 字幕去除：引擎探测、任务状态、抽帧预览（给区域框选用） |
-| POST | `/api/sub/probe` `/sub/start` `/sub/cancel` | 字幕去除：读视频信息 / 加入队列并开始（`area`=`ymin,ymax,xmin,xmax` 或 `none` 全帧自动）/ 取消当前；输出 `<原名>_no_sub.mp4` 在原目录 |
-| POST | `/api/sub/queue/add` `/queue/stop` `/queue/clear` `/queue/remove` | 去字幕批量队列：`paths` + `preset`(`bottom`/`top`/`none`/`custom`) + `box`(百分比 x0,y0,x1,y1) 入队，串行跑，区域按各视频自身尺寸换算；也兼容传 `area` 像素串 / 停止并清空待处理 / 清掉已完成 / 移除某条待处理 |
-| POST | `/api/tool/pick` `/tool/play` | 工具页共用：系统文件选择框 / 用默认播放器打开文件 |
+**中文显示成乱码**
+用 `启动.bat`（内含 `chcp 65001`）。子进程日志已做 UTF-8 / GBK 自适应解码。
 
----
+## 说明与致谢
 
-## 说明
+- 本项目只做本地处理，不提供任何素材、成片或绕过平台规则的能力，请用于**自有或已授权素材**的剪辑
+- 在线 BGM 来自 [Incompetech](https://incompetech.com/music/royalty-free/)，作者 **Kevin MacLeod**，协议 **CC BY 4.0**；下载入库时会自动生成 `BGM 署名对照.txt`，发布视频时请照此署名
+- 感谢这些开源项目：[ffmpeg](https://ffmpeg.org/)、[PySceneDetect](https://github.com/Breakthrough/PySceneDetect)、[faster-whisper](https://github.com/SYSTRAN/faster-whisper)、[CTranslate2](https://github.com/OpenNMT/CTranslate2)、[edge-tts](https://github.com/rany2/edge-tts)、[video-subtitle-remover](https://github.com/YaoFANGUK/video-subtitle-remover)、[video2x](https://github.com/k4yt3x/video2x)、[llama.cpp](https://github.com/ggml-org/llama.cpp)
 
-- 仅支持单机单用户使用，服务默认只监听 `127.0.0.1`。
-- 代码按个人工作流演进，配置与目录结构可能随时调整，不保证向后兼容。
+## 许可证
+
+[MIT](LICENSE)

@@ -1,0 +1,6 @@
+# Windows 批处理必须是 CRLF，否则 cmd 解析会出问题
+*.bat text eol=crlf
+*.ico binary
+*.mp4 binary
+*.png binary
+*.jpg binary
