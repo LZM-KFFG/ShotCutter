@@ -2353,6 +2353,10 @@ class Handler(BaseHTTPRequestHandler):
             snap = SUB_JOB.snapshot()
             snap["queue"] = SUB_QUEUE.snapshot()
             running = next((x for x in snap["queue"]["items"] if x["state"] == "running"), None)
+            if running:  # 正在跑的那条用实时进度，别等结束才回写
+                running["percent"] = float(snap.get("percent") or 0)
+                running["frame"] = int(snap.get("frame") or 0)
+                running["total"] = int(snap.get("total") or 0)
             snap["current"] = ({"id": running["id"], "name": running["name"],
                                 "percent": running["percent"]} if running else None)
             self._json(snap)

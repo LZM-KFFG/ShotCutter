@@ -506,7 +506,7 @@ function paint(st){
   if(atBottom) lg.scrollTop = lg.scrollHeight;
   $("#btnStart").disabled = false;     // 队列模式下随时可以再排一条
   $("#btnCancel").disabled = !st.running;
-  renderQueue(st.queue);
+  renderQueue(st.queue, st);
   const done = !st.running && st.output && st.phase === "已完成";
   $("#result").classList.toggle("on", !!done);
   if(done){
@@ -548,7 +548,7 @@ function areaLabel(raw){
   if(!raw || raw === "none") return "全帧自动";
   return "区域 " + raw;
 }
-function renderQueue(q){
+function renderQueue(q, live){
   if(!q) return;
   const items = q.items || [], c = q.counts || {};
   const list = $("#qList");
@@ -567,6 +567,9 @@ function renderQueue(q){
   }
   list.innerHTML = "";
   items.forEach(it=>{
+    // 正在跑的那条用实时进度（任务结束时才回写队列，否则会一直显示 0%）
+    const pct = (it.state === "running" && live && typeof live.percent === "number")
+      ? live.percent : (it.percent || 0);
     const row = document.createElement("div");
     row.className = "qrow" + (it.state === "running" ? " run" :
       it.state === "done" ? " done" : it.state === "error" ? " error" : "");
@@ -582,7 +585,7 @@ function renderQueue(q){
       const m = document.createElement("span");
       m.className = "mini";
       const bar = document.createElement("i");
-      bar.style.width = (it.percent || 0) + "%";
+      bar.style.width = pct + "%";
       m.appendChild(bar);
       row.appendChild(m);
     }
@@ -590,7 +593,7 @@ function renderQueue(q){
     const st = document.createElement("span");
     st.className = "st";
     st.textContent = it.state === "running"
-      ? "处理中 " + Math.round(it.percent || 0) + "%"
+      ? "处理中 " + Math.round(pct) + "%"
       : (QLABEL[it.state] || it.state);
     row.appendChild(st);
 
