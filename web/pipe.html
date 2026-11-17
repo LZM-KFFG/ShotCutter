@@ -462,6 +462,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
           <button class="g sm" id="btn-clearpool" title="把素材池清空（不动原始视频文件）">清空</button>
         </div>
       </div>
+      <div class="hintline" id="pool-src" style="margin:8px 0 0"></div>
       <div class="seltools" id="seltools" hidden>
         <span class="cnt" id="sel-cnt">已选 0 条</span>
         <button class="g sm" id="btn-selall">全选</button>
@@ -1241,6 +1242,27 @@ async function loadPool(){
   [...S.sel].forEach(id=>{ if(!alive.has(id)) S.sel.delete(id); });
   renderHealth(r.health);
 
+  // 池子可能攒了多个商品的素材：直接标出来，免得后面出方案/去重时莫名其妙混素材
+  const srcMap = {};
+  S.pool.forEach(x=>{
+    const parts = String(x.path || "").split(/[\\/]/);
+    const k = parts.slice(-3, -1).join("/");
+    if(k) srcMap[k] = (srcMap[k] || 0) + 1;
+  });
+  const srcKeys = Object.keys(srcMap);
+  const srcEl = $("#pool-src");
+  if(srcEl){
+    if(srcKeys.length > 1){
+      srcEl.textContent = "素材池里有 " + srcKeys.length + " 个来源：" +
+        srcKeys.map(k => k + "（" + srcMap[k] + "）").join(" · ") +
+        " —— 出方案/去重/写脚本时填好素材文件夹，只会用范围内的素材";
+      srcEl.style.color = "var(--warn)";
+    } else {
+      srcEl.textContent = srcKeys.length ? ("当前来源：" + srcKeys[0] + "（" + srcMap[srcKeys[0]] + " 条）") : "";
+      srcEl.style.color = "var(--dim)";
+    }
+  }
+
   const box = $("#pool"); box.innerHTML = "";
   $("#pool-empty").hidden = S.pool.length > 0;
   S.pool.forEach(it=>{
@@ -1623,7 +1645,8 @@ function refreshTagBtn(){
 }
 async function doTag(force){
   $("#btn-tag").disabled = $("#btn-tagall").disabled = true;
-  const r = await api("/api/pipe/tag", {force});
+  // 填了素材文件夹就只在这个范围里打标；留空才是全池
+  const r = await api("/api/pipe/tag", {force, folders: folderLines()});
   if(r.error){ toast(r.error); $("#btn-tagall").disabled = false; refreshTagBtn(); return; }
   if(!r.job){ toast(r.message || "没有需要打标的素材"); $("#btn-tagall").disabled = false; refreshTagBtn(); return; }
   const j = await pollJob(r.job, j=>{ bar($("#tag-bar"), j.progress||0); $("#tag-msg").textContent = j.message || ""; });
@@ -1854,7 +1877,8 @@ $("#btn-script").onclick = async ()=>{
   const pid = await ensureProject(); if(!pid) return;
   $("#btn-script").disabled = true;
   const body = { pid, product:productBody(), angles:S.angles,
-                 target:+$("#p-target").value, use_llm:$("#use-llm").checked };
+                 target:+$("#p-target").value, use_llm:$("#use-llm").checked,
+                 folders: folderLines() };
   const r = await api("/api/pipe/script", body);
   if(r.error){ toast(r.error); $("#btn-script").disabled = false; return; }
   const j = await pollJob(r.job, j=>{ bar($("#script-bar"), j.progress||0); $("#script-msg").textContent = j.message||""; });

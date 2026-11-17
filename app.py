@@ -3129,6 +3129,9 @@ class Handler(BaseHTTPRequestHandler):
                         line = os.path.normpath(line)   # 顺手把 // 与 ./ 这类写法归一
                     if line and line not in norm:
                         norm.append(line)
+            if not norm:
+                self._json({"error": "先填至少一个素材文件夹——不填会用整个素材池，容易混进别的商品"}, 400)
+                return
             product = payload.get("product") or {}
             try:
                 target = float(payload.get("target") or 45)
@@ -3277,6 +3280,9 @@ class Handler(BaseHTTPRequestHandler):
                         line = os.path.normpath(line)   # 顺手把 // 与 ./ 这类写法归一
                     if line and line not in norm:
                         norm.append(line)
+            if not norm:
+                self._json({"error": "先填至少一个素材文件夹——不填会用整个素材池，容易混进别的商品"}, 400)
+                return
             product = payload.get("product") or {}
             try:
                 target = float(payload.get("target") or 45)
@@ -3461,6 +3467,16 @@ class Handler(BaseHTTPRequestHandler):
             ids = payload.get("ids") or []
             force = bool(payload.get("force"))
             items = pipe.pool_list()
+            raw_f = payload.get("folders")
+            fl = [str(x) for x in raw_f] if isinstance(raw_f, (list, tuple)) else ([str(raw_f)] if raw_f else [])
+            fdirs = []
+            for f in fl:
+                for line in str(f).replace(";", "\n").splitlines():
+                    line = line.strip().strip('"').strip("'")
+                    if line:
+                        fdirs.append(os.path.normpath(line))
+            if fdirs:
+                items = pipe.scope_items(items, fdirs)
             if ids:
                 want = set(ids)
                 items = [i for i in items if i["id"] in want]
@@ -3576,8 +3592,22 @@ class Handler(BaseHTTPRequestHandler):
             angles = payload.get("angles") or list(pipe.ANGLES)
             target = float(payload.get("target") or 30)
             use_llm = payload.get("use_llm", True)
+            # 素材范围：优先用本次传的文件夹，其次沿用项目里记的
+            raw_f = payload.get("folders")
+            fl = [str(x) for x in raw_f] if isinstance(raw_f, (list, tuple)) else ([str(raw_f)] if raw_f else [])
+            fdirs = []
+            for f in fl:
+                for line in str(f).replace(";", "\n").splitlines():
+                    line = line.strip().strip('"').strip("'")
+                    if line:
+                        line = os.path.normpath(line)
+                    if line and line not in fdirs:
+                        fdirs.append(line)
+            if fdirs:
+                p["folders"] = fdirs
+            scope_dirs = fdirs or (p.get("folders") or [])
             tags = []
-            for it in pipe.pool_list():
+            for it in pipe.scope_items(pipe.pool_list(), scope_dirs):
                 tags.extend(it.get("tags") or [])
 
             job = new_job("script", 1)
