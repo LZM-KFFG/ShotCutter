@@ -136,7 +136,11 @@ button.sm{font-size:12px;padding:5px 11px}
 .qhead{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
 .qhead h3{margin:0;font-size:12.5px;font-weight:650;color:var(--muted);letter-spacing:.4px}
 .qsum{font:11px var(--mono);color:var(--dim);letter-spacing:.04em;margin-left:4px}
-.qacts{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+.qacts{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.qpick{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted);white-space:nowrap;margin-right:2px}
+.qpick select{font:inherit;font-size:11.5px;padding:5px 8px;border:1px solid var(--line-2);border-radius:7px;
+  background:#EDE9DE;color:var(--ink);outline:none;cursor:pointer}
+.qpick select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(193,59,27,.12)}
 .qlist{max-height:222px;overflow:auto;border:1px solid var(--line);border-radius:10px;background:#EDE9DE}
 .qempty{padding:14px 12px;font-size:11.5px;color:var(--dim);line-height:1.7}
 .qrow{display:flex;align-items:center;gap:10px;padding:7px 12px;border-bottom:1px solid var(--line);font-size:12px}
@@ -275,6 +279,15 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
     <div class="qhead">
       <h3>批量队列 <span class="qsum" id="qSum">队列是空的</span></h3>
       <div class="qacts">
+        <label class="qpick" title="批量入队用哪种字幕区域；「跟随当前框选」取预览区里拖出来的框">
+          入队区域
+          <select id="qArea">
+            <option value="none" selected>全帧自动</option>
+            <option value="bottom">底部 30%</option>
+            <option value="top">顶部 30%</option>
+            <option value="custom">跟随当前框选</option>
+          </select>
+        </label>
         <button class="g sm" id="btnQAdd">批量添加…</button>
         <button class="b sm" id="btnQNow">加入当前视频</button>
         <button class="g sm" id="btnQStop" disabled>停止队列</button>
@@ -530,7 +543,9 @@ async function start(){
   if(!state.video){ await probe(); if(!state.video) return; }
   setMsg("启动…");
   try{
-    const r = await api("/api/sub/start", {input: inp, area: areaStr()});
+    const qs = queueAreaSpec();
+    const r = await api("/api/sub/start",
+      {input: inp, preset: qs.preset, box: qs.box, area: areaStrForSpec(qs)});
     $("#result").classList.remove("on");
     renderQueue(r.queue);
     setMsg("已加入队列，首次加载模型可能要等一两分钟", "ok");
@@ -544,6 +559,34 @@ async function cancel(){
 
 /* ---------- 批量队列 ---------- */
 const QLABEL = {pending: "等待中", running: "处理中", done: "完成", error: "出错", canceled: "已取消"};
+function queueAreaSpec(){
+  const preset = $("#qArea").value || "none";
+  const v = state.video, a = state.area;
+  if(preset === "custom"){
+    if(v && v.width && v.height && a){
+      return {preset: "custom",
+              box: [a.x0 / v.width, a.y0 / v.height, a.x1 / v.width, a.y1 / v.height]};
+    }
+    return {preset: "none", box: []};   // 没框选就退回全帧
+  }
+  return {preset, box: []};
+}
+
+/* 按队列区域 + 当前视频尺寸算出像素区域：旧后端只认 area 时也能用对 */
+function areaStrForSpec(spec){
+  const v = state.video;
+  if(!v || !v.width || !v.height) return "none";
+  const w = v.width, h = v.height;
+  if(spec.preset === "bottom") return Math.round(h * .7) + "," + h + ",0," + w;
+  if(spec.preset === "top") return "0," + Math.round(h * .3) + ",0," + w;
+  if(spec.preset === "custom" && spec.box && spec.box.length === 4){
+    const [x0, y0, x1, y1] = spec.box;
+    return Math.round(h * y0) + "," + Math.round(h * y1) + ","
+      + Math.round(w * x0) + "," + Math.round(w * x1);
+  }
+  return "none";
+}
+
 function areaSpec(){
   const p = state.preset || "none";
   const v = state.video, a = state.area;
@@ -621,14 +664,27 @@ function renderQueue(q, live){
   });
 }
 
+/* 入队区域：默认全帧自动，选择记在本地 */
+const qAreaSel = $("#qArea");
+try{
+  const saved = localStorage.getItem("sub_qarea");
+  if(saved && [...qAreaSel.options].some(o => o.value === saved)) qAreaSel.value = saved;
+}catch(e){}
+qAreaSel.addEventListener("change", ()=>{
+  try{ localStorage.setItem("sub_qarea", qAreaSel.value); }catch(e){}
+  if(qAreaSel.value === "custom" && !state.area){
+    setMsg("还没在预览里框选，这批会按全帧自动处理", "err");
+  }
+});
+
 $("#btnQAdd").addEventListener("click", async ()=>{
   setMsg("打开选择窗口…");
   try{
     const r = await api("/api/tool/pick", {});
     if(r.state === "busy" || r.state === "timeout"){ setMsg(r.error, "err"); return; }
     if(r.state !== "ok" || !(r.paths || []).length){ setMsg(""); return; }
-    const spec = areaSpec();
-    // 同时带上 area：旧版本后端只认像素区域，新后端优先用 preset（按各视频尺寸换算）
+    const spec = queueAreaSpec();
+    // 同时带上像素 area：旧后端只认它，新后端优先用 preset（按各视频尺寸换算）
     const q = await api("/api/sub/queue/add",
       {paths: r.paths, preset: spec.preset, box: spec.box, area: areaStr()});
     if(q.error){ setMsg(q.error, "err"); return; }

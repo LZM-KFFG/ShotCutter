@@ -2960,12 +2960,15 @@ class Handler(BaseHTTPRequestHandler):
             if not os.path.isfile(inp):
                 self._json({"error": "找不到这个文件：%s" % inp}, 400)
                 return
-            area = _sub_area(payload.get("area"))
-            if isinstance(area, dict):
-                self._json(area, 400)
-                return
-            added, skipped = sub_enqueue([inp], {"mode": "px", "area_px": area,
-                                                 "label": _area_text(area)})
+            if payload.get("preset") is not None:
+                spec = _sub_spec_from_preset(payload.get("preset"), payload.get("box"))
+            else:
+                area = _sub_area(payload.get("area"))
+                if isinstance(area, dict):
+                    self._json(area, 400)
+                    return
+                spec = {"mode": "px", "area_px": area, "label": _area_text(area)}
+            added, skipped = sub_enqueue([inp], spec)
             if not added:
                 self._json({"error": "这条视频已经在队列里了"}, 409)
                 return
