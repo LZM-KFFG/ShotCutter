@@ -374,7 +374,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
       <h2>加入素材 <span class="hint">一个切片 = 一个镜头</span></h2>
       <div class="grid2">
         <div>
-          <label class="f">素材文件夹（一行一个，可以填多个；递归扫描里面的视频，每个文件当一条镜头）</label>
+          <label class="f">素材文件夹（一行一个，可填多个；递归扫描里的视频，每个文件算一条镜头 —— 出片只在这里面挑，不会动素材池里别的商品）</label>
           <textarea id="folder" rows="3" placeholder="D:\素材\收纳盒\切片&#10;E:\工作\直播素材\百合干\素材\镜头切片"></textarea>
           <div class="row" style="margin-top:6px">
             <button class="g sm" id="btn-dir">选择文件夹</button>
@@ -1251,14 +1251,23 @@ async function loadPool(){
   });
   const srcKeys = Object.keys(srcMap);
   const srcEl = $("#pool-src");
+  // 当前这条片子记下来的素材范围（出方案时写入脚本）：自动挑素材只认它，
+  // 池子里后来导入的别的商品不会被顺手带走。只读展示，不用人再填一遍。
+  const scFolders = (()=>{
+    const s = (S.project && (S.project.scripts||[])[S.idx||0]) || null;
+    return (s && s.folders) || (S.project && S.project.folders) || [];
+  })();
+  const scopeTxt = scFolders.map(x=> String(x).split(/[\\/]/).filter(Boolean).slice(-2).join("/")).join("、");
   if(srcEl){
     if(srcKeys.length > 1){
       srcEl.textContent = "素材池里有 " + srcKeys.length + " 个来源：" +
         srcKeys.map(k => k + "（" + srcMap[k] + "）").join(" · ") +
-        " —— 出方案/去重/写脚本时填好素材文件夹，只会用范围内的素材";
+        " —— 出片只在第 1 步填的目录里挑，不会动别的商品" +
+        (scopeTxt ? "；本片范围：" + scopeTxt : "；打开一个项目后会在这里显示它锁定的范围");
       srcEl.style.color = "var(--warn)";
     } else {
-      srcEl.textContent = srcKeys.length ? ("当前来源：" + srcKeys[0] + "（" + srcMap[srcKeys[0]] + " 条）") : "";
+      srcEl.textContent = (srcKeys.length ? ("当前来源：" + srcKeys[0] + "（" + srcMap[srcKeys[0]] + " 条）") : "")
+        + (scopeTxt ? "　·　本片范围：" + scopeTxt : "　·　本片还没记范围，出方案时按第 1 步的文件夹");
       srcEl.style.color = "var(--dim)";
     }
   }
@@ -2109,10 +2118,16 @@ $("#btn-align").onclick = async ()=>{
   const s = curScript(); if(!s){ toast("先生成脚本"); return; }
   if(!s.tts){ toast("先配音"); go(3); return; }
   $("#btn-align").disabled = true;
-  const r = await api("/api/pipe/align", {pid:S.pid, idx:S.idx});
+  // 顺带把第 1 步的文件夹带上：只影响「这条脚本还没记过范围」的情况
+  const r = await api("/api/pipe/align", {pid:S.pid, idx:S.idx, folders:folderLines()});
   $("#btn-align").disabled = false;
-  if(r.error){ toast(r.error); return; }
-  await reloadProject(); renderShots(); toast("对齐完成：" + r.plan.clips.length + " 个镜头");
+  if(r.error){ toast(r.error, 6000); return; }
+  await reloadProject(); renderShots(); loadPool();
+  const st = (r.plan && r.plan.stats) || {};
+  toast(st.guessed
+    ? ("对齐完成：" + r.plan.clips.length + " 个镜头（按品名锁定素材范围：" +
+       (st.scope || []).map(x=>String(x).split(/[\\/]/).filter(Boolean).slice(-2).join("/")).join("、") + "）")
+    : ("对齐完成：" + r.plan.clips.length + " 个镜头"));
 };
 function renderShots(){
   const s = curScript(), wrap = $("#shots-wrap");

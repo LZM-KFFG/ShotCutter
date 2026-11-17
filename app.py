@@ -3619,6 +3619,8 @@ class Handler(BaseHTTPRequestHandler):
                 for i, s in enumerate(r["scripts"]):
                     s["idx"] = i
                     s["target"] = target
+                    # 手写脚本也记下这次用的素材目录，出分镜时只在这里面挑
+                    s["folders"] = list(scope_dirs) or pipe.script_scope(s)
                 p["scripts"] = r["scripts"]
                 p["active"] = 0
                 pipe.project_save(p)
@@ -3667,8 +3669,22 @@ class Handler(BaseHTTPRequestHandler):
             if err:
                 self._json({"error": err}, 400)
                 return
+            # 第 1 步的素材文件夹可以随请求带上：老项目没存过范围时靠它兜一次，
+            # 之后范围会固化到脚本上，不用每次都传。
+            raw_f = payload.get("folders") or []
+            fl = [str(x) for x in raw_f] if isinstance(raw_f, (list, tuple)) else [str(raw_f)]
+            fdirs = []
+            for f in fl:
+                for line in str(f).replace(";", "\n").splitlines():
+                    line = line.strip().strip('"').strip("'")
+                    if line:
+                        line = os.path.normpath(line)
+                    if line and line not in fdirs:
+                        fdirs.append(line)
+            if fdirs:
+                p["folders"] = fdirs
             try:
-                plan = pipe.align(p, s, pipe.load_cfg())
+                plan = pipe.align(p, s, pipe.load_cfg(), folders=fdirs or None)
                 pipe.project_save(p)
                 self._json({"ok": True, "plan": plan})
             except Exception as exc:  # noqa: BLE001

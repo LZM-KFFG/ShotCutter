@@ -2817,11 +2817,15 @@ def _scope_roots(folders) -> list[str]:
 def scope_items(items: list[dict], folders) -> list[dict]:
     """只保留落在这些目录下的素材。
 
-    一键出片的素材范围存在 project["folders"] 里；不填就沿用整个池子（流水线的手动用法）。
+    给了范围就严格按范围过滤：范围本身为空 = 不限（老的手动用法）；
+    范围写了但一个目录都解析不出来，返回空——绝不悄悄退回整池，
+    那正是「柿饼素材混进腰果片子」的老毛病。
     """
+    if not (folders or []):
+        return items
     roots = _scope_roots(folders)
     if not roots:
-        return items
+        return []
     out = []
     for it in items:
         p = str(it.get("path") or "").lower()
@@ -2830,16 +2834,91 @@ def scope_items(items: list[dict], folders) -> list[dict]:
     return out
 
 
+def _dirs_of_paths(paths) -> list[str]:
+    """若干文件路径 → 它们所在目录（去重保序）。"""
+    out: list[str] = []
+    for p in paths or []:
+        p = str(p or "").strip()
+        if not p:
+            continue
+        try:
+            d = str(Path(p).parent)
+        except OSError:
+            continue
+        if d and d not in out:
+            out.append(d)
+    return out
+
+
+def guess_scope(name: str, items: list[dict]) -> list[str]:
+    """项目没记范围时，按品名猜一次商品目录（「柿饼」项目只挑柿饼那批素材）。
+
+    只在池子已有的商品目录里找：目录名的上一级出现在品名里就算命中。
+    命中多个说明品名同时提到几样东西，猜不准——直接返回空让上层报错，
+    绝不拿整池去凑。
+    """
+    name = str(name or "").strip()
+    if not name:
+        return []
+    hits, seen = [], set()
+    for it in items:
+        try:
+            par = Path(str(it.get("path") or "")).parent
+        except OSError:
+            continue
+        prod = par.parent
+        if not prod.name or len(prod.name) < 2 or prod.name not in name:
+            continue
+        key = str(prod).lower()
+        if key not in seen:
+            seen.add(key)
+            hits.append(str(prod))
+    return hits if len(hits) == 1 else []
+
+
+def script_scope(script: dict | None, project: dict | None = None,
+                 extra=None) -> list[str]:
+    """这条脚本能用哪些素材——按目录圈定，取不到就返回空让上层报错。
+
+    素材池是全局仓库，几个商品混着放时，谁都不该被顺手挑走。范围按这个顺序找：
+      1. 这条脚本出方案时用的目录（script["folders"]）
+      2. 项目最近一次出方案用的目录（project["folders"]）
+      3. extra：调用方给的兜底目录（换镜头时就是当前镜头自己所在目录）
+      4. 老项目没存范围：从它已经用过的镜头/原片路径反推所在目录
+    全程不回退到整池——宁可报错让人补一次文件夹，也不出串味的片子。
+    """
+    for src in ((script or {}).get("folders"), (project or {}).get("folders"), extra):
+        if _scope_roots(src):
+            return [str(x) for x in src]
+    used = [c.get("path") for c in (((script or {}).get("plan") or {}).get("clips") or [])]
+    used += [s.get("from") for s in ((script or {}).get("sentences") or [])]
+    return _dirs_of_paths(used)
+
+
 def align(project: dict, script: dict, cfg: dict, seed: int | None = None,
           folders=None) -> dict:
     tts = script.get("tts") or {}
     sents = tts.get("sentences") or []
     if not sents:
         raise RuntimeError("还没有配音，先做配音这一步")
-    scope = folders if folders is not None else (project.get("folders") or [])
-    items = scope_items(pool_list(), scope)
+    if folders:
+        scope = [str(x) for x in folders]
+    else:
+        scope = script_scope(script, project)
+    pool = pool_list()
+    guessed = False
+    if not scope:
+        # 老项目没存过范围：按品名对一遍池子里的商品目录，唯一命中才用
+        scope = guess_scope((project or {}).get("name") or script.get("title"), pool)
+        guessed = bool(scope)
+    if not scope:
+        raise RuntimeError("这条脚本没记录素材来源。先在「加入素材」里填/选这次要用的文件夹，"
+                           "再重新出一次方案——否则会从整个素材池里挑，容易混进别的商品")
+    items = scope_items(pool, scope)
     if not items:
-        raise RuntimeError("这个项目的素材范围里没有素材（检查素材文件夹，或重新出一次方案）")
+        raise RuntimeError("素材范围里没有素材了（%s）。检查文件夹还在不在，或重新出一次方案"
+                           % "、".join(scope[:2]))
+    script["folders"] = scope      # 固化到这条脚本上，以后换镜头也不会跑出这个范围
 
     v = cfg["video"]
     target_shot = float(v.get("shot") or 2.2)
@@ -2933,6 +3012,7 @@ def align(project: dict, script: dict, cfg: dict, seed: int | None = None,
             "reuse": max(usage.values()) if usage else 0,
             "pool": len(items),
             "dirs": sorted(src_dirs),
+            "scope": scope, "guessed": guessed,   # 这次用的素材范围；guessed=按品名猜的
         },
         "at": time.time(),
     }
@@ -2947,7 +3027,13 @@ def swap_clip(project: dict, script: dict, clip_index: int, cfg: dict) -> dict:
     if not (0 <= clip_index < len(clips)):
         raise RuntimeError("镜头序号越界")
     cur = clips[clip_index]
-    items = scope_items(pool_list(), project.get("folders") or [])
+    # 换镜头也守同一条范围：脚本/项目的来源目录都没有时，退到「当前镜头所在目录」，
+    # 只在同一批素材里换，不会跳到别的商品去。
+    scope = script_scope(script, project, [cur.get("path")])
+    items = scope_items(pool_list(), scope)
+    if not items:
+        raise RuntimeError("这条素材所在的目录里没有别的素材可换"
+                           "（或目录已不在素材池里）")
     keys = _keys(_hint_of(script, cur.get("sentence", 0), cur.get("text", "")))
     ranked = sorted(items, key=lambda it: -_score(it, keys, {}, cur["want"], None))
     ids = [it["id"] for it in ranked]

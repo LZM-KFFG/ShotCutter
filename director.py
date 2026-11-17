@@ -927,7 +927,8 @@ def items_in(folders: list | None) -> list[dict]:
         except OSError:
             continue
     if not roots:
-        return items
+        # 给了范围却一个目录都解析不出来：返回空，别顺手把整池端上来
+        return []
     out = []
     for it in items:
         p = str(it.get("path") or "").lower()
@@ -1200,7 +1201,17 @@ def director_worker(job: dict, project: dict, product: dict, target: float = 45.
     cfg = cfg or pipe.load_cfg()
     if folders:
         pipe.scan_folders(folders, job)
-    cls = classify(items_in(folders), job=job)
+    # 本次出片能用的素材范围：传了目录就按目录，没传就沿用项目记的，
+    # 都没有再按品名对一次池子里的商品目录。全推不出来就报错——
+    # 池子里常常躺着别的商品的素材，宁可让人补一次目录也不出串味的片子。
+    scope = [str(x) for x in folders] if folders else list(project.get("folders") or [])
+    if not scope:
+        scope = pipe.guess_scope(product.get("name") or project.get("name"), pipe.pool_list())
+    if not scope:
+        raise RuntimeError("没填素材文件夹，项目里也没记过范围。先在「加入素材」里填/选这次要用的目录"
+                           "——不填会从整个素材池里挑，容易混进别的商品")
+    project["folders"] = list(scope)
+    cls = classify(items_in(scope), job=job)
     aroll_all, broll_all = list(cls["aroll"]), list(cls["broll"])
     aroll, broll = list(aroll_all), list(broll_all)
     skip_set: set[str] = set()
@@ -1348,9 +1359,13 @@ def director_worker(job: dict, project: dict, product: dict, target: float = 45.
     scripts = project.get("scripts") or []
     idxs = []
     for m in made:
-        m["script"]["idx"] = len(scripts)
-        idxs.append(m["script"]["idx"])
-        scripts.append(m["script"])
+        sc = m["script"]
+        sc["idx"] = len(scripts)
+        # 每条脚本记住自己是在哪批目录里出的：重新对齐、换镜头都只认这个范围，
+        # 之后往素材池里再导入别的商品，也不会被这条片子顺手挑走。
+        sc["folders"] = list(scope) or pipe.script_scope(sc)
+        idxs.append(sc["idx"])
+        scripts.append(sc)
     project["scripts"] = scripts
     project["product"] = product
     if (product.get("name") or "").strip():
