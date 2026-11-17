@@ -1488,18 +1488,20 @@ class SubQueue:
         self.cancel_current = False
         self.stop_all = False
 
-    def add(self, paths, area: str) -> tuple[int, int]:
+    def add(self, paths, spec: dict) -> tuple[int, int]:
         added = skipped = 0
-        area = (area or "none").strip() or "none"
+        spec = spec or {}
+        key_spec = (spec.get("mode"), spec.get("preset"), tuple(spec.get("pbox") or ()),
+                    spec.get("area_px"))
         with self.lock:
-            seen = {(it["path"].lower(), it["area"]) for it in self.items
+            seen = {(it["path"].lower(), it.get("spec_key")) for it in self.items
                     if it["state"] in ("pending", "running")}
             for raw in paths:
                 path = str(raw or "").strip().strip('"')
                 if not path or not os.path.isfile(path):
                     skipped += 1
                     continue
-                key = (path.lower(), area)
+                key = (path.lower(), key_spec)
                 if key in seen:
                     skipped += 1
                     continue
@@ -1507,7 +1509,12 @@ class SubQueue:
                 self.seq += 1
                 self.items.append({
                     "id": self.seq, "path": path,
-                    "name": os.path.basename(path), "area": area,
+                    "name": os.path.basename(path),
+                    "spec_key": key_spec, "mode": spec.get("mode") or "preset",
+                    "preset": spec.get("preset") or "none",
+                    "pbox": list(spec.get("pbox") or []),
+                    "area_px": spec.get("area_px") or "none",
+                    "area": spec.get("label") or "全帧自动",
                     "state": "pending", "percent": 0.0, "frame": 0, "total": 0,
                     "output": "", "error": "", "started": 0.0, "finished": 0.0,
                 })
@@ -1875,6 +1882,16 @@ def sub_worker(inp: str, area: str):
             SUB_JOB.finished_at = time.time()
 
 
+def _area_text(area: str) -> str:
+    if not area or area == "none":
+        return "全帧自动"
+    parts = [int(x) for x in re.findall(r"\d+", area)][:4]
+    if len(parts) == 4:
+        y0, y1, x0, x1 = parts
+        return "区域 %d×%d" % (x1 - x0, y1 - y0)
+    return "自定义区域"
+
+
 def _sub_area(raw):
     """校验并规范化字幕区域：返回字符串（none 或 ymin,ymax,xmin,xmax）；不合法时返回错误 dict。"""
     area = str(raw or "").strip()
@@ -1883,6 +1900,32 @@ def _sub_area(raw):
     if not re.fullmatch(r"\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*\d+", area):
         return {"error": "区域格式不对，应为 ymin,ymax,xmin,xmax"}
     return area
+
+
+def _resolve_item_area(item: dict) -> str:
+    """把队列里的区域规格算成这条视频自己的像素坐标（不同分辨率批量混跑也不会切歪）。"""
+    mode = item.get("mode") or "preset"
+    if mode == "px":
+        return str(item.get("area_px") or "none")
+    preset = item.get("preset") or "none"
+    if preset == "none":
+        return "none"
+    try:
+        info = tool_probe(item["path"])
+        w, h = int(info["width"]), int(info["height"])
+    except Exception as exc:  # noqa: BLE001
+        SUB_JOB.log("提示：读不到视频尺寸（%s），这条按全帧自动处理" % exc)
+        return "none"
+    if preset == "bottom":
+        return "%d,%d,0,%d" % (round(h * 0.70), h, w)
+    if preset == "top":
+        return "0,%d,0,%d" % (round(h * 0.30), w)
+    box = item.get("pbox") or [0.0, 0.0, 1.0, 1.0]
+    try:
+        x0, y0, x1, y1 = [float(v) for v in box[:4]]
+    except Exception:  # noqa: BLE001
+        x0, y0, x1, y1 = 0.0, 0.0, 1.0, 1.0
+    return "%d,%d,%d,%d" % (round(h * y0), round(h * y1), round(w * x0), round(w * x1))
 
 
 def _sub_runner():
@@ -1904,7 +1947,7 @@ def _sub_runner():
             nxt["started"] = time.time()
             item_id = nxt["id"]
             SUB_QUEUE.cancel_current = False
-        sub_worker(nxt["path"], nxt["area"])
+        sub_worker(nxt["path"], _resolve_item_area(nxt))
         snap = SUB_JOB.snapshot()
         with SUB_QUEUE.lock:
             was_cancel = SUB_QUEUE.cancel_current
@@ -1935,11 +1978,29 @@ def _sub_ensure_runner():
         t.start()
 
 
-def sub_enqueue(paths, area: str) -> tuple[int, int]:
-    added, skipped = SUB_QUEUE.add(paths, area)
+def sub_enqueue(paths, spec: dict) -> tuple[int, int]:
+    added, skipped = SUB_QUEUE.add(paths, spec)
     if added:
         _sub_ensure_runner()
     return added, skipped
+
+
+AREA_LABEL = {"bottom": "底部 30%", "top": "顶部 30%", "none": "全帧自动", "custom": "手动框选"}
+
+
+def _sub_spec_from_preset(preset: str, box) -> dict:
+    """前端传的是预设名 + 百分比框，这里转成队列规格。"""
+    preset = (preset or "none").strip()
+    if preset not in ("bottom", "top", "none", "custom"):
+        preset = "none"
+    pbox = []
+    if preset == "custom" and isinstance(box, (list, tuple)) and len(box) >= 4:
+        try:
+            pbox = [min(1.0, max(0.0, float(v))) for v in box[:4]]
+        except Exception:  # noqa: BLE001
+            pbox = []
+    return {"mode": "preset", "preset": preset, "pbox": pbox,
+            "label": AREA_LABEL.get(preset, "全帧自动")}
 
 
 def sub_frame(path: str, t: float) -> tuple[Path, float]:
@@ -2903,7 +2964,8 @@ class Handler(BaseHTTPRequestHandler):
             if isinstance(area, dict):
                 self._json(area, 400)
                 return
-            added, skipped = sub_enqueue([inp], area)
+            added, skipped = sub_enqueue([inp], {"mode": "px", "area_px": area,
+                                                 "label": _area_text(area)})
             if not added:
                 self._json({"error": "这条视频已经在队列里了"}, 409)
                 return
@@ -2923,11 +2985,16 @@ class Handler(BaseHTTPRequestHandler):
             if not paths:
                 self._json({"error": "先选要加入队列的视频"}, 400)
                 return
-            area = _sub_area(payload.get("area"))
-            if isinstance(area, dict):
-                self._json(area, 400)
-                return
-            added, skipped = sub_enqueue(paths, area)
+            if payload.get("preset") is not None:
+                spec = _sub_spec_from_preset(payload.get("preset"), payload.get("box"))
+            else:
+                # 兼容只传像素 area 的老调用方
+                area = _sub_area(payload.get("area"))
+                if isinstance(area, dict):
+                    self._json(area, 400)
+                    return
+                spec = {"mode": "px", "area_px": area, "label": _area_text(area)}
+            added, skipped = sub_enqueue(paths, spec)
             self._json({"ok": True, "added": added, "skipped": skipped,
                         "queue": SUB_QUEUE.snapshot()})
             return

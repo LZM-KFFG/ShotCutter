@@ -544,9 +544,14 @@ async function cancel(){
 
 /* ---------- 批量队列 ---------- */
 const QLABEL = {pending: "等待中", running: "处理中", done: "完成", error: "出错", canceled: "已取消"};
-function areaLabel(raw){
-  if(!raw || raw === "none") return "全帧自动";
-  return "区域 " + raw;
+function areaSpec(){
+  const p = state.preset || "none";
+  const v = state.video, a = state.area;
+  if(p === "custom" && v && v.width && v.height && a){
+    return {preset: "custom",
+            box: [a.x0 / v.width, a.y0 / v.height, a.x1 / v.width, a.y1 / v.height]};
+  }
+  return {preset: p === "custom" ? "none" : p, box: []};
 }
 function renderQueue(q, live){
   if(!q) return;
@@ -578,7 +583,7 @@ function renderQueue(q, live){
     row.appendChild(nm);
 
     const ar = document.createElement("span");
-    ar.className = "ar"; ar.textContent = areaLabel(it.area);
+    ar.className = "ar"; ar.textContent = it.area || "全帧自动";
     row.appendChild(ar);
 
     if(it.state === "running"){
@@ -622,7 +627,10 @@ $("#btnQAdd").addEventListener("click", async ()=>{
     const r = await api("/api/tool/pick", {});
     if(r.state === "busy" || r.state === "timeout"){ setMsg(r.error, "err"); return; }
     if(r.state !== "ok" || !(r.paths || []).length){ setMsg(""); return; }
-    const q = await api("/api/sub/queue/add", {paths: r.paths, area: areaStr()});
+    const spec = areaSpec();
+    // 同时带上 area：旧版本后端只认像素区域，新后端优先用 preset（按各视频尺寸换算）
+    const q = await api("/api/sub/queue/add",
+      {paths: r.paths, preset: spec.preset, box: spec.box, area: areaStr()});
     if(q.error){ setMsg(q.error, "err"); return; }
     renderQueue(q.queue);
     setMsg("已加入 " + q.added + " 条" + (q.skipped ? "，" + q.skipped + " 条跳过（重复或不存在）" : ""), "ok");
