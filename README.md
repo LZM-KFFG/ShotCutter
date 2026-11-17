@@ -420,7 +420,8 @@ ShotCutter/
 | GET | `/api/hd/info` `/hd/status` | 视频变高清：引擎/GPU 探测、任务状态（帧/fps/ETA/日志） |
 | POST | `/api/hd/probe` `/hd/start` `/hd/cancel` | 高清：读视频信息 / 启动（`processor`/`model`/`factor`/`interp_factor`/`codec`/`quality`）/ 取消；输出到 `D:\VideoUpscaler\output` |
 | GET | `/api/sub/info` `/sub/status` `/sub/frame?path=&t=` | 字幕去除：引擎探测、任务状态、抽帧预览（给区域框选用） |
-| POST | `/api/sub/probe` `/sub/start` `/sub/cancel` | 字幕去除：读视频信息 / 启动（`area`=`ymin,ymax,xmin,xmax` 或 `none` 全帧自动）/ 取消；输出 `<原名>_no_sub.mp4` 在原目录 |
+| POST | `/api/sub/probe` `/sub/start` `/sub/cancel` | 字幕去除：读视频信息 / 加入队列并开始（`area`=`ymin,ymax,xmin,xmax` 或 `none` 全帧自动）/ 取消当前；输出 `<原名>_no_sub.mp4` 在原目录 |
+| POST | `/api/sub/queue/add` `/queue/stop` `/queue/clear` `/queue/remove` | 去字幕批量队列：`paths`+`area` 入队（串行跑）/ 停止并清空待处理 / 清掉已完成 / 移除某条待处理 |
 | POST | `/api/tool/pick` `/tool/play` | 工具页共用：系统文件选择框 / 用默认播放器打开文件 |
 
 ---

@@ -1475,6 +1475,55 @@ class ToolJob:
 
 HD_JOB = ToolJob()
 SUB_JOB = ToolJob()
+
+
+class SubQueue:
+    """去字幕队列：串行跑，避免同时把显存吃满。"""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.items: list[dict] = []
+        self.seq = 0
+        self.thread = None
+        self.cancel_current = False
+        self.stop_all = False
+
+    def add(self, paths, area: str) -> tuple[int, int]:
+        added = skipped = 0
+        area = (area or "none").strip() or "none"
+        with self.lock:
+            seen = {(it["path"].lower(), it["area"]) for it in self.items
+                    if it["state"] in ("pending", "running")}
+            for raw in paths:
+                path = str(raw or "").strip().strip('"')
+                if not path or not os.path.isfile(path):
+                    skipped += 1
+                    continue
+                key = (path.lower(), area)
+                if key in seen:
+                    skipped += 1
+                    continue
+                seen.add(key)
+                self.seq += 1
+                self.items.append({
+                    "id": self.seq, "path": path,
+                    "name": os.path.basename(path), "area": area,
+                    "state": "pending", "percent": 0.0, "frame": 0, "total": 0,
+                    "output": "", "error": "", "started": 0.0, "finished": 0.0,
+                })
+                added += 1
+        return added, skipped
+
+    def snapshot(self) -> dict:
+        with self.lock:
+            items = [dict(x) for x in self.items]
+        counts = {"pending": 0, "running": 0, "done": 0, "error": 0, "canceled": 0}
+        for it in items:
+            counts[it["state"]] = counts.get(it["state"], 0) + 1
+        return {"items": items[-100:], "counts": counts, "total": len(items)}
+
+
+SUB_QUEUE = SubQueue()
 _HD_GPUS: list[dict] = []
 _HD_GPU_LOCK = threading.Lock()
 
@@ -1824,6 +1873,73 @@ def sub_worker(inp: str, area: str):
         with SUB_JOB.lock:
             SUB_JOB.running = False
             SUB_JOB.finished_at = time.time()
+
+
+def _sub_area(raw):
+    """校验并规范化字幕区域：返回字符串（none 或 ymin,ymax,xmin,xmax）；不合法时返回错误 dict。"""
+    area = str(raw or "").strip()
+    if not area or area.lower() in ("none", "null"):
+        return "none"
+    if not re.fullmatch(r"\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*\d+", area):
+        return {"error": "区域格式不对，应为 ymin,ymax,xmin,xmax"}
+    return area
+
+
+def _sub_runner():
+    """串行消费队列：一次只跑一条，跑完自动接下一个。"""
+    while True:
+        with SUB_QUEUE.lock:
+            if SUB_QUEUE.stop_all:
+                SUB_QUEUE.stop_all = False
+                for it in SUB_QUEUE.items:
+                    if it["state"] == "pending":
+                        it["state"] = "canceled"
+                SUB_QUEUE.thread = None
+                return
+            nxt = next((it for it in SUB_QUEUE.items if it["state"] == "pending"), None)
+            if not nxt:
+                SUB_QUEUE.thread = None
+                return
+            nxt["state"] = "running"
+            nxt["started"] = time.time()
+            item_id = nxt["id"]
+            SUB_QUEUE.cancel_current = False
+        sub_worker(nxt["path"], nxt["area"])
+        snap = SUB_JOB.snapshot()
+        with SUB_QUEUE.lock:
+            was_cancel = SUB_QUEUE.cancel_current
+            SUB_QUEUE.cancel_current = False
+            it = next((x for x in SUB_QUEUE.items if x["id"] == item_id), None)
+            if it:
+                it["percent"] = float(snap.get("percent") or 0)
+                it["frame"] = int(snap.get("frame") or 0)
+                it["total"] = int(snap.get("total") or 0)
+                it["output"] = snap.get("output") or ""
+                it["error"] = snap.get("error") or ""
+                it["finished"] = time.time()
+                if was_cancel:
+                    it["state"] = "canceled"
+                elif snap.get("error"):
+                    it["state"] = "error"
+                else:
+                    it["state"] = "done"
+                    it["percent"] = 100.0
+
+
+def _sub_ensure_runner():
+    with SUB_QUEUE.lock:
+        if SUB_QUEUE.thread and SUB_QUEUE.thread.is_alive():
+            return
+        t = threading.Thread(target=_sub_runner, daemon=True)
+        SUB_QUEUE.thread = t
+        t.start()
+
+
+def sub_enqueue(paths, area: str) -> tuple[int, int]:
+    added, skipped = SUB_QUEUE.add(paths, area)
+    if added:
+        _sub_ensure_runner()
+    return added, skipped
 
 
 def sub_frame(path: str, t: float) -> tuple[Path, float]:
@@ -2179,7 +2295,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"error": "只允许本机操作"}, 403)
                 return
             busy = any(j.get("state") == "running" for j in JOBS.values())
-            if busy or HD_JOB.running or SUB_JOB.running:
+            if busy or HD_JOB.running or SUB_JOB.running or SUB_QUEUE.snapshot()["counts"]["pending"]:
                 self._json({"error": "还有任务在跑，等它跑完再退出"}, 400)
                 return
             self._json({"ok": True, "message": "服务正在退出"})
@@ -2234,7 +2350,12 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "vsr": VSR_PY.exists() and VSR_RUN.exists(),
                         "root": str(VSR_ROOT), "gpu": gpu_name()})
         elif u.path == "/api/sub/status":
-            self._json(SUB_JOB.snapshot())
+            snap = SUB_JOB.snapshot()
+            snap["queue"] = SUB_QUEUE.snapshot()
+            running = next((x for x in snap["queue"]["items"] if x["state"] == "running"), None)
+            snap["current"] = ({"id": running["id"], "name": running["name"],
+                                "percent": running["percent"]} if running else None)
+            self._json(snap)
         elif u.path == "/api/sub/frame":
             path = (q.get("path") or [""])[0]
             ts = (q.get("t") or ["0"])[0]
@@ -2767,9 +2888,6 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if u.path == "/api/sub/start":
-            if SUB_JOB.running:
-                self._json({"error": "已有去字幕任务在跑"}, 409)
-                return
             if not (VSR_PY.exists() and VSR_RUN.exists()):
                 self._json({"error": "找不到 VSR：%s" % VSR_PY}, 400)
                 return
@@ -2777,16 +2895,75 @@ class Handler(BaseHTTPRequestHandler):
             if not os.path.isfile(inp):
                 self._json({"error": "找不到这个文件：%s" % inp}, 400)
                 return
-            area = (payload.get("area") or "").strip()
-            if area and area.lower() not in ("none", "null") \
-                    and not re.fullmatch(r"\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*\d+", area):
-                self._json({"error": "区域格式不对，应为 ymin,ymax,xmin,xmax"}, 400)
+            area = _sub_area(payload.get("area"))
+            if isinstance(area, dict):
+                self._json(area, 400)
                 return
-            threading.Thread(target=sub_worker, args=(inp, area), daemon=True).start()
-            self._json({"ok": True})
+            added, skipped = sub_enqueue([inp], area)
+            if not added:
+                self._json({"error": "这条视频已经在队列里了"}, 409)
+                return
+            self._json({"ok": True, "queued": added, "skipped": skipped,
+                        "queue": SUB_QUEUE.snapshot()})
+            return
+
+        if u.path == "/api/sub/queue/add":
+            if not (VSR_PY.exists() and VSR_RUN.exists()):
+                self._json({"error": "找不到 VSR：%s" % VSR_PY}, 400)
+                return
+            raw = payload.get("paths")
+            paths = [str(x) for x in raw] if isinstance(raw, (list, tuple)) else []
+            if not paths:
+                one = str(payload.get("path") or "").strip()
+                paths = [one] if one else []
+            if not paths:
+                self._json({"error": "先选要加入队列的视频"}, 400)
+                return
+            area = _sub_area(payload.get("area"))
+            if isinstance(area, dict):
+                self._json(area, 400)
+                return
+            added, skipped = sub_enqueue(paths, area)
+            self._json({"ok": True, "added": added, "skipped": skipped,
+                        "queue": SUB_QUEUE.snapshot()})
+            return
+
+        if u.path == "/api/sub/queue/stop":
+            with SUB_QUEUE.lock:
+                SUB_QUEUE.stop_all = True
+                SUB_QUEUE.cancel_current = True
+            _kill_proc(SUB_JOB.proc)
+            self._json({"ok": True, "queue": SUB_QUEUE.snapshot()})
+            return
+
+        if u.path == "/api/sub/queue/clear":
+            with SUB_QUEUE.lock:
+                keep = [x for x in SUB_QUEUE.items
+                        if x["state"] in ("pending", "running")]
+                dropped = len(SUB_QUEUE.items) - len(keep)
+                SUB_QUEUE.items = keep
+            self._json({"ok": True, "dropped": dropped,
+                        "queue": SUB_QUEUE.snapshot()})
+            return
+
+        if u.path == "/api/sub/queue/remove":
+            try:
+                item_id = int(payload.get("id"))
+            except Exception:  # noqa: BLE001
+                self._json({"error": "缺任务 id"}, 400)
+                return
+            with SUB_QUEUE.lock:
+                before = len(SUB_QUEUE.items)
+                SUB_QUEUE.items = [x for x in SUB_QUEUE.items
+                                   if not (x["id"] == item_id and x["state"] == "pending")]
+                removed = before - len(SUB_QUEUE.items)
+            self._json({"ok": True, "removed": removed,
+                        "queue": SUB_QUEUE.snapshot()})
             return
 
         if u.path == "/api/sub/cancel":
+            with SUB_QUEUE.lock:
+                SUB_QUEUE.cancel_current = True
             ok = _kill_proc(SUB_JOB.proc)
             self._json({"ok": ok})
             return
