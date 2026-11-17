@@ -2471,9 +2471,11 @@ class Handler(BaseHTTPRequestHandler):
             cfg = pipe.load_cfg()
             if u.path == "/api/pipe/sub/cues":
                 plan = pipe.sub_plan(p, scripts[idx], cfg)
+                clips = (scripts[idx].get("plan") or {}).get("clips") or []
                 self._json({"ok": True, "idx": idx,
                             "video": {"w": cfg["video"]["w"], "h": cfg["video"]["h"],
                                       "sub_max_chars": plan["max_chars"]},
+                            "clips": len(clips),
                             "hook": plan["hook"], "cues": plan["cues"]})
                 return
             try:

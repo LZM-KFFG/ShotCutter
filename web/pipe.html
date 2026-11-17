@@ -336,6 +336,16 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
 .hp-row:last-child{border-bottom:0}
 .hp-row:hover{background:#FCFAF4}
 .hp-row.hook{background:#FAEEDA;color:#8A5A10}
+
+/* 字幕预览：固定高度上限 + 居中舞台，竖屏也不会把弹层撑爆 */
+.hp-stage{position:relative;background:#14120E;border:1px solid #2A2621;border-radius:10px;
+  min-height:260px;max-height:min(58vh,520px);display:flex;align-items:center;justify-content:center;
+  overflow:hidden;padding:8px}
+#hp-img{max-width:100%;max-height:calc(min(58vh,520px) - 18px);width:auto;height:auto;display:block;border-radius:7px}
+.hp-stage .hp-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  color:#8B8578;font-size:12px;text-align:center;padding:24px;line-height:1.9;white-space:pre-line}
+.hp-stage.has-img .hp-empty{display:none}
+.hp-stage:not(.has-img) #hp-img{display:none}
 </style>
 </head>
 <body>
@@ -709,7 +719,10 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
         <div id="hp-list" style="max-height:44vh;overflow:auto;border:1px solid var(--line);border-radius:9px"></div>
       </div>
       <div>
-        <img id="hp-img" alt="字幕预览" style="width:100%;border-radius:10px;background:#14120E;display:block">
+        <div class="hp-stage">
+          <img id="hp-img" alt="字幕预览">
+          <div class="hp-empty" id="hp-empty">点左边的字幕条目，这里显示那一刻的画面</div>
+        </div>
         <div class="hintline" id="hp-tip" style="margin-top:6px">预览取自成片画面，按画幅等比缩放；实际输出分辨率更高。</div>
       </div>
     </div>
@@ -2280,14 +2293,37 @@ async function loadSubPv(){
   });
   $("#hp-msg").textContent = rows.length + " 条字幕 · 每行最多 " +
     ((r.video && r.video.sub_max_chars) || 14) + " 字";
+  if(r.clips === 0){   // 旧后端不返回 clips，undefined 时照常预览
+    const stage = document.querySelector(".hp-stage"), empty = $("#hp-empty");
+    if(stage) stage.classList.remove("has-img");
+    if(empty) empty.textContent = "这条脚本还没生成分镜（点「出方案」或去流水线第 3 步对齐），先看字幕清单就好。";
+    $("#hp-tip").textContent = "没有分镜，暂时取不到画面";
+    return;
+  }
   if(rows.length) hpPreview((rows[0].start + rows[0].end) / 2);
 }
 function hpPreview(t){
   SUBPV.t = Math.max(0, t);
+  const stage = document.querySelector(".hp-stage");
+  if(stage) stage.classList.remove("has-img");
   $("#hp-img").src = "/api/pipe/sub/preview?pid=" + encodeURIComponent(SUBPV.pid) +
     "&idx=" + SUBPV.idx + "&t=" + SUBPV.t.toFixed(2) + "&v=" + Date.now();
   $("#hp-tip").textContent = "预览时间 " + fmtDur(SUBPV.t) + " · 取自成片画面，按画幅等比缩放";
 }
+
+/* 预览图加载：成功才显示，失败在舞台上给一句人话（而不是一块黑） */
+(function(){
+  const img = $("#hp-img"), stage = document.querySelector(".hp-stage"), empty = $("#hp-empty");
+  if(!img || !stage || !empty) return;
+  img.addEventListener("load", ()=>{
+    stage.classList.add("has-img");
+    empty.textContent = "";
+  });
+  img.addEventListener("error", ()=>{
+    stage.classList.remove("has-img");
+    empty.textContent = "这一刻取不到画面（分镜可能刚被重挑，或素材文件不在了）。\n点左侧别的条目再试，或直接渲染看效果。";
+  });
+})();
 $("#hp-save").onclick = async ()=>{
   $("#hp-msg").textContent = "保存中…";
   const r = await api("/api/pipe/config", {video:{
