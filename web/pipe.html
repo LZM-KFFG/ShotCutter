@@ -1258,8 +1258,24 @@ async function loadPool(){
     return (s && s.folders) || (S.project && S.project.folders) || [];
   })();
   const scopeTxt = scFolders.map(x=> String(x).split(/[\\/]/).filter(Boolean).slice(-2).join("/")).join("、");
+  // 这个范围在池子里还剩几条：换过商品后，第 1 步的文件夹框常常还留着上一个商品的路径，
+  // 出片/去重/打标就全对不上，先在这里把话说明白
+  let inScope = -1;
+  if(scFolders.length){
+    const roots = scFolders.map(f=> String(f).toLowerCase().replace(/\//g, "\\").replace(/\\+$/, ""))
+                           .filter(Boolean);
+    inScope = S.pool.filter(x=>{
+      const p = String(x.path || "").toLowerCase().replace(/\//g, "\\");
+      return roots.some(r=> p.startsWith(r + "\\") || p === r);
+    }).length;
+  }
   if(srcEl){
-    if(srcKeys.length > 1){
+    if(inScope === 0){
+      srcEl.textContent = "本片锁定的素材范围（" + scopeTxt + "）在池子里已经一条都没有了 —— 出片会报"
+        + "「范围里没有素材」。把第 1 步的素材文件夹改成现在这批"
+        + (srcKeys.length ? "（" + srcKeys[0] + "）" : "") + "就好";
+      srcEl.style.color = "var(--err)";
+    } else if(srcKeys.length > 1){
       srcEl.textContent = "素材池里有 " + srcKeys.length + " 个来源：" +
         srcKeys.map(k => k + "（" + srcMap[k] + "）").join(" · ") +
         " —— 出片只在第 1 步填的目录里挑，不会动别的商品" +
@@ -1654,8 +1670,9 @@ function refreshTagBtn(){
 }
 async function doTag(force){
   $("#btn-tag").disabled = $("#btn-tagall").disabled = true;
-  // 填了素材文件夹就只在这个范围里打标；留空才是全池
-  const r = await api("/api/pipe/tag", {force, folders: folderLines()});
+  // 打标是素材池自己的维护动作，按整池来：第 1 步的文件夹可能还留着上一个商品的路径，
+  // 跟着它走就会出现「池子里 320 条，却提示没有需要打标的素材」。
+  const r = await api("/api/pipe/tag", {force, folders: []});
   if(r.error){ toast(r.error); $("#btn-tagall").disabled = false; refreshTagBtn(); return; }
   if(!r.job){ toast(r.message || "没有需要打标的素材"); $("#btn-tagall").disabled = false; refreshTagBtn(); return; }
   const j = await pollJob(r.job, j=>{ bar($("#tag-bar"), j.progress||0); $("#tag-msg").textContent = j.message || ""; });
@@ -1674,9 +1691,10 @@ async function doDedup(){
   btn.disabled = true;
   $("#dd-bar").style.display = "";
   msg.style.display = ""; msg.textContent = "开始比对画面…";
-  // 只在上方填的素材文件夹范围内去重；留空才全池比（同一商品目录之外永不互相判重）
-  DEDUP_SCOPE = folderLines();
-  const r = await api("/api/pipe/pool/dedup", {folders: DEDUP_SCOPE});
+  // 去重按整个素材池来（后端按商品目录分组，不同商品之间永不互相判重）。
+  // 以前跟着第 1 步的文件夹走，换了商品后那个框还留着旧路径，一点就提示「素材不足 2 条」。
+  DEDUP_SCOPE = [];
+  const r = await api("/api/pipe/pool/dedup", {folders: []});
   if(r.error || !r.job){
     $("#dd-bar").style.display = "none"; btn.disabled = false;
     msg.textContent = r.error || r.message || "去重没起来";
@@ -1716,7 +1734,7 @@ function renderDedup(){
   const box = $("#dd-list"); box.innerHTML = "";
   const scopeTxt = DEDUP_SCOPE.length
     ? DEDUP_SCOPE.map(x => x.split(/[\\/]/).filter(Boolean).slice(-2).join("/")).join("、")
-    : "全部素材";
+    : "整个素材池";
   $("#dd-sub").textContent = DEDUP.groups.length + " 组 · 重复 " + DEDUP.dup_count +
     " 条 · 可省 " + (DEDUP.saved||0).toFixed(1) + " 秒 · 范围 " + scopeTxt;
   DEDUP.groups.forEach(g=>{

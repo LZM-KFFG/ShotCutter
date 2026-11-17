@@ -3533,7 +3533,11 @@ class Handler(BaseHTTPRequestHandler):
             if fdirs:
                 items = pipe.scope_items(items, fdirs)   # 只在这个范围内去重
             if len(items) < 2:
-                self._json({"ok": True, "job": None, "message": "素材不足 2 条，不用去重"})
+                msg = "素材不足 2 条，不用去重"
+                if fdirs:
+                    msg = ("去重范围内只有 %d 条素材——填的素材文件夹和池子对不上？"
+                           "清空那个框就是整池去重" % len(items))
+                self._json({"ok": True, "job": None, "message": msg})
                 return
             job = new_job("dedup", len(items))
             threading.Thread(target=_run_job, args=(job, pipe.dedup_worker, items, job),

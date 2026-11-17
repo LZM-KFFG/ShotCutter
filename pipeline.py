@@ -890,6 +890,13 @@ def pool_health(items: list[dict] | None = None) -> dict:
                   for k, n in sorted(cat.items(), key=lambda x: -x[1])[:6]]
 
     pct = {r["k"]: r["pct"] for r in out["shot"]}
+    # 大半没打标时，景别统计几乎全是"未标景别"，据此给建议只会吓人（"全景 0 条"）。
+    # 这时候只说一件事：先去打标。
+    if out["tagged"] < total * 0.5:
+        out["advice"].append({"level": "warn",
+                              "text": "还有 %d 条没打标（共 %d 条）。先点「打标」再看体检——"
+                                      "景别和画面大类都是按标签统计的。" % (total - out["tagged"], total)})
+        return out
     spec = pct.get("特写", 0.0)
     wide = pct.get("全景", 0.0) + pct.get("远景", 0.0)
     mid = pct.get("中景", 0.0) + pct.get("近景", 0.0)
