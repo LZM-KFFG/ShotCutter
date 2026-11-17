@@ -9,7 +9,7 @@
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?logo=windows&logoColor=white)](#)
 [![Local](https://img.shields.io/badge/100%25%20Local-No%20Cloud-2E7D5B)](#)
-[![License](https://img.shields.io/badge/License-MIT-C13B1B)](LICENSE)
+[![License](https://img.shields.io/badge/License-AGPL%20v3-C13B1B)](LICENSE)
 
 </div>
 
@@ -192,4 +192,13 @@ Windows 任务管理器的 GPU 图默认显示 3D 引擎，CUDA 工作在另一�
 
 ## 许可证
 
-[MIT](LICENSE)
+[GNU AGPL-3.0](LICENSE)
+
+可以自由使用、修改、分发（包括商用），但有两条例外：
+
+- **分发修改版必须以 AGPL-3.0 开源**，并保留版权声明与协议文本
+- **把修改版做成网络服务**（SaaS / 在线版）时，同样必须向使用者提供完整源码
+
+> 之所以选 AGPL 而不是 MIT：项目依赖的 `edge-tts` 本身是 GPL-3.0，用 AGPL 与它协议兼容；同时能避免有人改个名字就闭源转卖。
+>
+> 如果你的公司需要**闭源商用授权**（不想公开修改的代码），可以联系作者单独谈——版权在作者手里，可以双授权。
