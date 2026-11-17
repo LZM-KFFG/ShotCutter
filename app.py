@@ -2174,6 +2174,9 @@ def render_scripts(job: dict, p: dict, idxs: list, cfg: dict) -> tuple[list, lis
     n = len(idxs)
     outs, fails = [], []
     scripts = p.get("scripts") or []
+    # 一批里的几条片共用一个使用记录：前面用过的素材在后面继续扣分，
+    # 否则几条片都是同一批镜头，看着像复制粘贴。
+    shared_use: dict = {}
     for k, si in enumerate(idxs):
         pipe.job_gate(job)
         job["state"] = "running"
@@ -2184,7 +2187,8 @@ def render_scripts(job: dict, p: dict, idxs: list, cfg: dict) -> tuple[list, lis
         acfg = dirw.align_cfg(cfg, s)
         try:
             job["message"] = "[%d/%d] 分镜…" % (k + 1, n)
-            pipe.align(p, s, acfg, seed=None if k == 0 else k * 13 + 7)
+            pipe.align(p, s, acfg, seed=None if k == 0 else k * 13 + 7,
+                       used=shared_use)
             pipe.project_save(p)
             job["message"] = "[%d/%d] 渲染…" % (k + 1, n)
             pipe.compose_worker(p, s, acfg, _BatchJob(job, k, n),

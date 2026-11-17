@@ -2257,7 +2257,7 @@ $("#bm-go").onclick = async ()=>{
   if(!confirm("开始批量出片？\n\n" + idxs.length + " 条脚本 × 每脚本 " + variants + " 版 = " + total + " 条成片\n" +
               "预计 " + mins + " 分钟左右（本机渲染，可以挂着去做别的）\n\n" +
               "配音：" + ($("#bm-tts").value === "1" ? "全部重做" : "缺的才补") + "\n" +
-              "分镜：" + ($("#bm-align").value === "1" ? "每版重新随机" : "保留已调好的"))) return;
+              "分镜：" + ($("#bm-align").value === "1" ? "每版自动换一批镜头" : "第一版保留已调好的，其余版本仍会换镜头"))) return;
   $("#bm-go").disabled = true;
   $("#bm-out").innerHTML = "";
   $("#bm-msg").textContent = "提交中…";

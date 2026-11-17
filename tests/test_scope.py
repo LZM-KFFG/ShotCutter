@@ -98,5 +98,21 @@ check("scope_items 返回空", pipe.scope_items(ITEMS, [r"D:\不存在的目录\
 print("7) 没有范围的手动调用仍可用（素材池整体浏览）")
 check("空范围返回全部", len(pipe.scope_items(ITEMS, [])) == 5)
 
+print("8) 同一脚本出多版 → 镜头不能是同一批（批量出片的核心回归）")
+MANY = [item("c%02d" % i, CASHEW, "c%02d.mp4" % i) for i in range(12)]
+pipe.pool_list = lambda only_tagged=False: [dict(x) for x in MANY]
+shared: dict = {}
+seen = []
+for v in range(3):
+    s = mk_script([CASHEW])
+    plan = pipe.align({"id": "t6", "folders": [CASHEW]}, s, CFG,
+                      seed=None if v == 0 else 2 * 100 + v, used=shared)
+    seen.append({c["item_id"] for c in plan["clips"]})
+check("三版不是同一批镜头", len({frozenset(x) for x in seen}) == 3,
+      str([len(x) for x in seen]))
+check("第 2 版和已用镜头基本错开", len(seen[0] & seen[1]) <= 1,
+      "重合 %d" % len(seen[0] & seen[1]))
+
+
 print("\n结果：" + ("全部通过" if ok else "有失败项"))
 sys.exit(0 if ok else 1)

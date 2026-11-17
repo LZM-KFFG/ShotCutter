@@ -649,8 +649,25 @@ def _pool_load() -> dict:
     return {"items": {}}
 
 
-def _pool_save(pool: dict) -> None:
+def _pool_save(pool: dict, allow_empty: bool = False) -> None:
     with _lock:
+        # 防呆：池子「从有到无」几乎总是 bug（某次读失败拿到空 dict 再保存，
+        # 一次就把几百条素材和打标全抹了）。真清空走 pool_clear 显式放行。
+        if not (pool.get("items") or {}) and not allow_empty:
+            try:
+                old = json.loads(POOL_PATH.read_text(encoding="utf-8"))
+                if old.get("items"):
+                    try:
+                        import traceback  # noqa: PLC0415
+                        with (PIPE / "pool-guard.log").open("a", encoding="utf-8") as fh:
+                            fh.write(time.strftime("%Y-%m-%d %H:%M:%S") + " 拦下一次空池写入\n"
+                                     + "".join(traceback.format_stack()[-6:]) + "\n")
+                    except Exception:  # noqa: BLE001
+                        pass
+                    raise RuntimeError("要把素材池写空，已拦下（保护机制，素材没丢）。"
+                                       "确实要清空请点素材池的「清空」")
+            except (OSError, ValueError):
+                pass
         tmp = POOL_PATH.with_name("pool.%d.%d.tmp" % (os.getpid(), threading.get_ident()))
         tmp.write_text(json.dumps(pool, ensure_ascii=False), encoding="utf-8")
         try:
@@ -794,7 +811,7 @@ def pool_clear(untagged_only: bool = False) -> int:
             keep[k] = v
     n = len(pool["items"]) - len(keep)
     pool["items"] = keep
-    _pool_save(pool)
+    _pool_save(pool, allow_empty=True)
     return n
 
 
@@ -2755,16 +2772,21 @@ def _blob(item: dict) -> str:
 
 
 def _candidates(items: list[dict], keys: list[str]) -> list[dict]:
-    """先挑"内容对得上"的素材，一条都没有（素材里没这个主体/动作）才退回全池。
+    """先挑"内容对得上"的素材，对得上的排在前面，其余垫后。
 
-    以前内容词和景别词同权相加，"中景 翻炒"会挑中一个中景的菌包：景别对了、画面跑题。
-    带货片里画面跑题比景别差一号严重得多，所以内容优先、景别当加分项。
+    以前只返回命中项（没有命中才退回全池），素材池里真正打上这个标签的
+    只有几条时，8 个镜头就会围着这几条来回用，成片看着像卡带。
+    现在命中项照旧优先，剩下的按分数垫在后面：只有前面都用过一轮之后，
+    才会轮到它们，既保住"内容优先"，又不至于没得换。
     """
     other = [k for k in keys if k not in SHOT_WORDS]
     if not other:
         return items
     hit = [it for it in items if any(k in _blob(it) for k in other)]
-    return hit or items
+    if not hit or len(hit) == len(items):
+        return hit or items
+    ids = {it["id"] for it in hit}
+    return hit + [it for it in items if it["id"] not in ids]
 
 
 def _score(item: dict, keys: list[str], usage: dict, want: float, last: dict | None,
@@ -2896,7 +2918,7 @@ def script_scope(script: dict | None, project: dict | None = None,
 
 
 def align(project: dict, script: dict, cfg: dict, seed: int | None = None,
-          folders=None) -> dict:
+          folders=None, used: dict | None = None) -> dict:
     tts = script.get("tts") or {}
     sents = tts.get("sentences") or []
     if not sents:
@@ -2926,7 +2948,11 @@ def align(project: dict, script: dict, cfg: dict, seed: int | None = None,
     max_shot = float(v.get("max_shot") or 4.5)
     total = float(tts.get("total") or sents[-1]["end"])
 
-    usage: dict[str, int] = {}
+    # used 由批量渲染传进来：前面几条片子用过的素材在这里继续扣分，
+    # 一批里几条片才不会从头到尾都是同一批镜头。
+    usage: dict[str, int] = used if used is not None else {}
+    local: dict[str, int] = {}       # 只统计这一条片子的复用，用于页面显示
+    path_use: dict[str, int] = {}    # 同一个视频文件用了几次（不同区间也算）
     clips: list[dict] = []
     last = None
     base_seed = hash(script.get("title", "")) & 0xFFFF
@@ -2954,12 +2980,21 @@ def align(project: dict, script: dict, cfg: dict, seed: int | None = None,
             best = -1e9
             for it in picks:
                 sc = _score(it, keys, usage, seg, last, used_sem)
-                sc += rnd.random() * 0.35
+                # 同一条视频反复出现（哪怕是不同区间）看着就像卡带，用过就压一档；
+                # 批量渲染时 used 是共用的，所以后面几条片也会避开前面用过的机位。
+                pk = "p:" + it["path"]
+                sc -= (path_use.get(it["path"], 0) + usage.get(pk, 0)) * 2.4
+                # 抖动给大一点：同一句常常有几条素材分数咬得很近，
+                # 只抖 0.35 等于次次都选第一条，多版本就成了复制粘贴。
+                sc += rnd.random() * 0.9
                 if sc > best:
                     best, pick = sc, it
             if pick is None:
                 break
             usage[pick["id"]] = usage.get(pick["id"], 0) + 1
+            usage["p:" + pick["path"]] = usage.get("p:" + pick["path"], 0) + 1
+            local[pick["id"]] = local.get(pick["id"], 0) + 1
+            path_use[pick["path"]] = path_use.get(pick["path"], 0) + 1
             used_sem |= _scene_tags(pick)
             avail = pick["dur"]
             if avail >= seg:
@@ -3009,7 +3044,7 @@ def align(project: dict, script: dict, cfg: dict, seed: int | None = None,
         "audio": tts.get("audio"), "shot": target_shot,
         "stats": {
             "clips": len(clips), "materials": len({c["item_id"] for c in clips}),
-            "reuse": max(usage.values()) if usage else 0,
+            "reuse": max(local.values()) if local else 0,
             "pool": len(items),
             "dirs": sorted(src_dirs),
             "scope": scope, "guessed": guessed,   # 这次用的素材范围；guessed=按品名猜的
@@ -3552,6 +3587,10 @@ def batch_worker(project: dict, idxs: list, cfg: dict, job: dict,
     made, failed = [], []
     done = 0
     stop = False
+    # 整批共用一份使用记录：同一条素材在一批里尽量只出现一次。
+    # 以前每个版本只是换个 seed，打分的随机抖动才 0.35，压不过内容/景别那几分，
+    # 于是「每脚本 3 版」出来的三条片子镜头几乎一样——批量出片最常被吐槽的就是这个。
+    shared_use: dict = {}
 
     for k, i in enumerate(valid):
         s = scripts[i]
@@ -3598,7 +3637,8 @@ def batch_worker(project: dict, idxs: list, cfg: dict, job: dict,
                 has_plan = bool((s.get("plan") or {}).get("clips"))
                 if realign or v > 0 or not has_plan:
                     vprog(0.02, "选镜头…")
-                    align(project, s, cfg, seed=None if v == 0 else (i + 1) * 100 + v)
+                    align(project, s, cfg, seed=None if v == 0 else (i + 1) * 100 + v,
+                          used=shared_use)
                     project_save(project)
                 n_clip = len((s.get("plan") or {}).get("clips") or [])
                 vprog(0.28, "渲染 %d 个镜头…" % n_clip)
