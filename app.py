@@ -3499,6 +3499,19 @@ class Handler(BaseHTTPRequestHandler):
 
         if u.path == "/api/pipe/pool/dedup":
             items = pipe.pool_list()
+            raw_f = payload.get("folders")
+            if isinstance(raw_f, (list, tuple)):
+                fl = [str(x) for x in raw_f]
+            else:
+                fl = [str(raw_f)] if raw_f else []
+            fdirs = []
+            for f in fl:
+                for line in str(f).replace(";", "\n").splitlines():
+                    line = line.strip().strip('"').strip("'")
+                    if line:
+                        fdirs.append(os.path.normpath(line))
+            if fdirs:
+                items = pipe.scope_items(items, fdirs)   # 只在这个范围内去重
             if len(items) < 2:
                 self._json({"ok": True, "job": None, "message": "素材不足 2 条，不用去重"})
                 return

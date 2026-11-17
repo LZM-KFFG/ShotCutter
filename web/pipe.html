@@ -146,7 +146,8 @@ button.sm{font-size:12px;padding:5px 10px}
 .ddg .tus{display:flex;gap:8px;flex-wrap:wrap}
 .ddg .tu{width:92px;cursor:pointer;position:relative}
 .ddg .tu img{width:92px;height:58px;object-fit:cover;border-radius:6px;display:block;background:#DDD8CB;border:1px solid var(--line)}
-.ddg .tu .cap{font-size:10.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ddg .ddg .gh .dir{font:10px var(--mono);color:var(--dim);margin-left:auto;letter-spacing:.04em}
+.tu .cap{font-size:10.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ddg .tu.keep{cursor:default}
 .ddg .tu.keep img{border-color:#3E7A4E;box-shadow:0 0 0 2px rgba(62,122,78,.16)}
 .ddg .tu.keep .cap{color:var(--ok)}
@@ -1634,13 +1635,16 @@ async function doTag(force){
 /* ---------- 素材去重 ---------- */
 /* 只出报告、不自动删：同一段素材留哪条见仁见智，让人看一眼缩略图再决定 */
 let DEDUP = null;
+let DEDUP_SCOPE = [];
 async function doDedup(){
   if(S.pool.length < 2){ toast("素材少于 2 条，不用去重"); return; }
   const btn = $("#btn-dedup"), msg = $("#dd-msg");
   btn.disabled = true;
   $("#dd-bar").style.display = "";
   msg.style.display = ""; msg.textContent = "开始比对画面…";
-  const r = await api("/api/pipe/pool/dedup", {});
+  // 只在上方填的素材文件夹范围内去重；留空才全池比（同一商品目录之外永不互相判重）
+  DEDUP_SCOPE = folderLines();
+  const r = await api("/api/pipe/pool/dedup", {folders: DEDUP_SCOPE});
   if(r.error || !r.job){
     $("#dd-bar").style.display = "none"; btn.disabled = false;
     msg.textContent = r.error || r.message || "去重没起来";
@@ -1662,7 +1666,7 @@ function thumbCell(it, isKeep, g, di){
   img.onerror = ()=> img.remove();
   t.appendChild(img);
   const cap = mk("div","cap", it.name + " · " + fmtDur(it.dur));
-  cap.title = it.file + (it.tags.length ? "  " + it.tags.join(" · ") : "");
+  cap.title = it.file + (it.dir ? "  " + it.dir : "") + (it.tags.length ? "  " + it.tags.join(" · ") : "");
   if(isKeep){
     t.appendChild(mk("span","kb","保留"));
   }else{
@@ -1678,14 +1682,18 @@ function thumbCell(it, isKeep, g, di){
 }
 function renderDedup(){
   const box = $("#dd-list"); box.innerHTML = "";
+  const scopeTxt = DEDUP_SCOPE.length
+    ? DEDUP_SCOPE.map(x => x.split(/[\\/]/).filter(Boolean).slice(-2).join("/")).join("、")
+    : "全部素材";
   $("#dd-sub").textContent = DEDUP.groups.length + " 组 · 重复 " + DEDUP.dup_count +
-    " 条 · 可省 " + (DEDUP.saved||0).toFixed(1) + " 秒";
+    " 条 · 可省 " + (DEDUP.saved||0).toFixed(1) + " 秒 · 范围 " + scopeTxt;
   DEDUP.groups.forEach(g=>{
     const d = mk("div","ddg");
     const hd = mk("div","gh");
     hd.appendChild(mk("span","rs", g.reason));
     hd.appendChild(mk("span","ex", "去掉 " + g.dupes.length + " 条、留 1 条" +
       (g.reason === "画面近似" ? "（画面差异 " + g.dist + "/256）" : "")));
+    if(g.keep && g.keep.dir) hd.appendChild(mk("span","dir", g.keep.dir));
     d.appendChild(hd);
     const tus = mk("div","tus");
     tus.appendChild(thumbCell(g.keep, true, g, -1));

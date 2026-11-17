@@ -960,15 +960,34 @@ def _fp_dist(a: dict, b: dict) -> tuple[int, float]:
 
 
 def _keep_rank(it: dict) -> tuple:
-    """一组重复里留哪条：已打标且有语义标签 > 已打标 > 更长 > 更早入库。"""
-    return (1 if it.get("tagged") else 0,
+    """一组重复里留哪条：已去字幕 > 已打标且有语义标签 > 已打标 > 更长 > 更早入库。
+
+    去字幕版本优先：10.mp4 与 10_no_sub.mp4 画面几乎一样，留清理过的那条才有用。
+    """
+    name = str(it.get("name") or Path(str(it.get("path") or "")).name).lower()
+    return (1 if "_no_sub" in name else 0,
+            1 if it.get("tagged") else 0,
             1 if _scene_tags(it) else 0,
             round(float(it.get("dur") or 0), 1),
             -float(it.get("added") or 0))
 
 
+def _prod_dir(it: dict) -> str:
+    """商品目录（素材文件夹的上一级）：腰果 / 柿饼。跨这个目录的素材不互相判重。"""
+    try:
+        return str(Path(it["path"]).resolve().parent.parent).lower()
+    except OSError:
+        return ""
+
+
 def _brief(it: dict) -> dict:
+    try:
+        _par = Path(it["path"]).parent
+        _dir = "%s/%s" % (_par.parent.name, _par.name) if _par.name else ""
+    except OSError:
+        _dir = ""
     return {"id": it["id"], "name": it.get("name") or Path(it["path"]).name,
+            "dir": _dir,
             "dur": round(float(it.get("dur") or 0), 1),
             "start": round(float(it.get("start") or 0), 1),
             "file": Path(it["path"]).name,
@@ -1049,6 +1068,8 @@ def pool_dedup(items: list[dict] | None = None, job: dict | None = None) -> dict
         for k in kept_fp:
             if k["keep"]["id"] in taken:
                 continue
+            if _prod_dir(it) != _prod_dir(k["keep"]):
+                continue          # 不同商品目录的素材永不互相判重
             ham, col = _fp_dist(it["fp"], k["keep"]["fp"])
             ok = ham <= (DEDUP_NEAR + 4 if len(it["fp"]["h"]) < 2 or len(k["keep"]["fp"]["h"]) < 2 else DEDUP_NEAR)
             if ok and col <= DEDUP_COLOR:
