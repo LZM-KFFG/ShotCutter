@@ -10,6 +10,7 @@
 [![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?logo=windows&logoColor=white)](#)
 [![Local](https://img.shields.io/badge/100%25%20Local-No%20Cloud-2E7D5B)](#)
 [![License](https://img.shields.io/badge/License-AGPL%20v3-C13B1B)](LICENSE)
+[![Commercial](https://img.shields.io/badge/Commercial-License%20Available-2E7D5B)](#版权与商业授权)
 
 </div>
 
@@ -153,6 +154,8 @@ ShotCutter/
 ├─ docs/images/      README 截图
 ├─ install.bat       首次安装
 ├─ 启动.bat           日常启动
+├─ LICENSE           AGPL-3.0 协议原文
+├─ CLA.md            贡献者许可协议
 └─ requirements.txt
 ```
 
@@ -200,5 +203,17 @@ Windows 任务管理器的 GPU 图默认显示 3D 引擎，CUDA 工作在另一�
 - **把修改版做成网络服务**（SaaS / 在线版）时，同样必须向使用者提供完整源码
 
 > 之所以选 AGPL 而不是 MIT：项目依赖的 `edge-tts` 本身是 GPL-3.0，用 AGPL 与它协议兼容；同时能避免有人改个名字就闭源转卖。
->
-> 如果你的公司需要**闭源商用授权**（不想公开修改的代码），可以联系作者单独谈——版权在作者手里，可以双授权。
+
+## 版权与商业授权
+
+**Copyright (c) 2026 LZM-KFFG. All rights reserved.**
+
+- 本项目的著作权归作者所有。AGPL-3.0 授予的是**开源使用**的权利，不包含闭源分发或闭源商用的许可。
+- 如果你的公司或产品需要**闭源集成 / 闭源分发 / OEM 贴牌 / 私有部署**，需要单独获取商业授权（双许可）。可以通过仓库 Issues 或作者 GitHub 主页联系，标题注明「商业授权」。
+- 商业授权不改变社区版：社区版始终以 AGPL-3.0 提供，功能与更新不受影响。
+
+## 贡献
+
+欢迎提 Issue 反馈 bug、提需求、报兼容性问题。
+
+**代码 PR 需要先签署[贡献者许可协议（CLA）](CLA.md)**。原因很直接：项目要保留商业双许可的可能，版权必须集中；如果有未授权的第三方代码进来，以后想换许可证就换不成了。PR 里加一行声明即可，见 CLA 第 7 节。
