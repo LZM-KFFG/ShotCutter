@@ -84,13 +84,12 @@ plan4b = pipe.align({"id": "t5"}, s4b, CFG)
 check("锁到腰果", dirs_of(plan4b) == [CASHEW], str(dirs_of(plan4b)))
 check("标记为猜的", plan4b["stats"]["guessed"] is True)
 
-print("5) 老脚本没范围但已有镜头 → 换镜头只在同目录")
+print("5) 老脚本没范围但已有镜头 → 换镜头只在同目录（柿饼那 2 条里换）")
 s3 = mk_script(with_plan=True)
-try:
-    pipe.swap_clip({"id": "t4"}, s3, 0, CFG)
-    check("柿饼目录只有 1 条，应当换不动", False)
-except RuntimeError as exc:
-    check("提示同目录没别的素材", "目录" in str(exc), str(exc))
+swapped = pipe.swap_clip({"id": "t4"}, s3, 0, CFG)
+check("换到了同目录的另一条", str(Path(swapped["path"]).parent) == PERSIM,
+      swapped["path"])
+check("没有换成腰果", swapped["item_id"] in ("b1", "b2"), swapped["item_id"])
 
 print("6) 给了范围但目录无效 → 不退回全池")
 check("scope_items 返回空", pipe.scope_items(ITEMS, [r"D:\不存在的目录\素材"]) == [])
@@ -113,6 +112,14 @@ check("三版不是同一批镜头", len({frozenset(x) for x in seen}) == 3,
 check("第 2 版和已用镜头基本错开", len(seen[0] & seen[1]) <= 1,
       "重合 %d" % len(seen[0] & seen[1]))
 
+
+print("9) 素材文件夹填成子目录（切割器导出的「镜头切片」）→ 按上级目录兜底")
+hit, used, up = pipe.resolve_scope(ITEMS, [CASHEW + "\\镜头切片"])
+check("只取到腰果那批（3 条）", len(hit) == 3, "hit=%d" % len(hit))
+check("标记了上溯", up is True)
+check("范围已修正为上级目录", used == [CASHEW], str(used))
+empty, _used2, up2 = pipe.resolve_scope(ITEMS, [r"D:\不存在的目录\素材"])
+check("上级目录也没有就返回空", empty == [] and up2 is False)
 
 print("\n结果：" + ("全部通过" if ok else "有失败项"))
 sys.exit(0 if ok else 1)

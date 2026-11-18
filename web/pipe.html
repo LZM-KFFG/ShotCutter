@@ -1257,33 +1257,46 @@ async function loadPool(){
     const s = (S.project && (S.project.scripts||[])[S.idx||0]) || null;
     return (s && s.folders) || (S.project && S.project.folders) || [];
   })();
-  const scopeTxt = scFolders.map(x=> String(x).split(/[\\/]/).filter(Boolean).slice(-2).join("/")).join("、");
-  // 这个范围在池子里还剩几条：换过商品后，第 1 步的文件夹框常常还留着上一个商品的路径，
-  // 出片/去重/打标就全对不上，先在这里把话说明白
-  let inScope = -1;
-  if(scFolders.length){
-    const roots = scFolders.map(f=> String(f).toLowerCase().replace(/\//g, "\\").replace(/\\+$/, ""))
-                           .filter(Boolean);
-    inScope = S.pool.filter(x=>{
+  const shortName = list => list.map(x=> String(x).split(/[\\/]/).filter(Boolean).slice(-2).join("/")).join("、");
+  // 一堆路径里，池子里实际有多少条。填成子目录（素材\镜头切片）时上溯一级再数，
+  // 因为池里的条目指向原视频，和后端的 resolve_scope 保持同一口径。
+  const countInDirs = dirs => {
+    const norm = f=> String(f).toLowerCase().replace(/\//g, "\\").replace(/\\+$/, "");
+    const roots = dirs.map(norm).filter(Boolean);
+    const parents = roots.map(r=>{ const i = r.lastIndexOf("\\"); return i > 2 ? r.slice(0, i) : ""; })
+                         .filter(Boolean);
+    const countIn = list => S.pool.filter(x=>{
       const p = String(x.path || "").toLowerCase().replace(/\//g, "\\");
-      return roots.some(r=> p.startsWith(r + "\\") || p === r);
+      return list.some(r=> p.startsWith(r + "\\") || p === r);
     }).length;
-  }
+    return countIn(roots) || countIn(parents);
+  };
+  const scopeTxt = shortName(scFolders);
+  const scInPool = scFolders.length ? countInDirs(scFolders) : -1;
+  // 换商品后项目里记的还是旧范围，第 1 步框里才是这次要用的：判断「池子里有没有」
+  // 优先看框里的目录，否则红字会一直挂着，人明明已经改了文件夹。
+  const pickDirs = folderLines();
+  const checkDirs = pickDirs.length ? pickDirs : scFolders;
+  const checkTxt = shortName(checkDirs);
+  const inScope = checkDirs.length ? countInDirs(checkDirs) : -1;
+  const scopeLabel = scopeTxt ? (scopeTxt + (scInPool === 0 ? "（池里已无）" : "")) : "";
   if(srcEl){
     if(inScope === 0){
-      srcEl.textContent = "本片锁定的素材范围（" + scopeTxt + "）在池子里已经一条都没有了 —— 出片会报"
-        + "「范围里没有素材」。把第 1 步的素材文件夹改成现在这批"
-        + (srcKeys.length ? "（" + srcKeys[0] + "）" : "") + "就好";
+      srcEl.textContent = (pickDirs.length ? "第 1 步填的素材文件夹" : "本片锁定的素材范围")
+        + "（" + checkTxt + "）在池子里一条都没有 —— 出片会报「范围里没有素材」。"
+        + (pickDirs.length
+            ? "换成一个有素材的目录就行"
+            : "把第 1 步的素材文件夹改成现在这批" + (srcKeys.length ? "（" + srcKeys[0] + "）" : "") + "就好");
       srcEl.style.color = "var(--err)";
     } else if(srcKeys.length > 1){
       srcEl.textContent = "素材池里有 " + srcKeys.length + " 个来源：" +
         srcKeys.map(k => k + "（" + srcMap[k] + "）").join(" · ") +
         " —— 出片只在第 1 步填的目录里挑，不会动别的商品" +
-        (scopeTxt ? "；本片范围：" + scopeTxt : "；打开一个项目后会在这里显示它锁定的范围");
+        (scopeTxt ? "；本片范围：" + scopeLabel : "；打开一个项目后会在这里显示它锁定的范围");
       srcEl.style.color = "var(--warn)";
     } else {
       srcEl.textContent = (srcKeys.length ? ("当前来源：" + srcKeys[0] + "（" + srcMap[srcKeys[0]] + " 条）") : "")
-        + (scopeTxt ? "　·　本片范围：" + scopeTxt : "　·　本片还没记范围，出方案时按第 1 步的文件夹");
+        + (scopeTxt ? "　·　本片范围：" + scopeLabel : "　·　本片还没记范围，出方案时按第 1 步的文件夹");
       srcEl.style.color = "var(--dim)";
     }
   }
@@ -2142,10 +2155,14 @@ $("#btn-align").onclick = async ()=>{
   if(r.error){ toast(r.error, 6000); return; }
   await reloadProject(); renderShots(); loadPool();
   const st = (r.plan && r.plan.stats) || {};
-  toast(st.guessed
-    ? ("对齐完成：" + r.plan.clips.length + " 个镜头（按品名锁定素材范围：" +
-       (st.scope || []).map(x=>String(x).split(/[\\/]/).filter(Boolean).slice(-2).join("/")).join("、") + "）")
-    : ("对齐完成：" + r.plan.clips.length + " 个镜头"));
+  const scopeShow = (st.scope || []).map(x=> String(x).split(/[\\/]/).filter(Boolean).slice(-2).join("/")).join("、");
+  let okMsg = "对齐完成：" + r.plan.clips.length + " 个镜头";
+  if(st.guessed){
+    okMsg += "（按品名锁定素材范围：" + scopeShow + "）";
+  } else if(st.scope_upgraded){
+    okMsg += "（素材文件夹填的是子目录，已按上级目录出片：" + scopeShow + "）";
+  }
+  toast(okMsg, (st.guessed || st.scope_upgraded) ? 6500 : 2400);
 };
 function renderShots(){
   const s = curScript(), wrap = $("#shots-wrap");

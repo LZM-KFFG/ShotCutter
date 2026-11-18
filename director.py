@@ -915,26 +915,10 @@ def items_in(folders: list | None) -> list[dict]:
     """只取这几个目录下的池子条目。
 
     一键模式必须按目录圈定范围：否则每跑一次都要把整个池子（可能几百条）
-    重体检一遍，白等几分钟。
+    重体检一遍，白等几分钟。口径与 pipeline 保持一致（含子目录上溯），
+    这样「素材文件夹填成 素材\\镜头切片」也能正常出片。
     """
-    items = pipe.pool_list()
-    if not folders:
-        return items
-    roots = []
-    for f in folders:
-        try:
-            roots.append(str(Path(str(f)).resolve()).lower().rstrip("\\/"))
-        except OSError:
-            continue
-    if not roots:
-        # 给了范围却一个目录都解析不出来：返回空，别顺手把整池端上来
-        return []
-    out = []
-    for it in items:
-        p = str(it.get("path") or "").lower()
-        if any(p.startswith(r + "\\") or p.startswith(r + "/") for r in roots):
-            out.append(it)
-    return out
+    return pipe.scope_items(pipe.pool_list(), folders)
 
 
 def prepare_worker(job: dict, folders: list | None = None, cfg: dict | None = None) -> dict:
@@ -1210,8 +1194,17 @@ def director_worker(job: dict, project: dict, product: dict, target: float = 45.
     if not scope:
         raise RuntimeError("没填素材文件夹，项目里也没记过范围。先在「加入素材」里填/选这次要用的目录"
                            "——不填会从整个素材池里挑，容易混进别的商品")
+    got, used_scope, upgraded = pipe.resolve_scope(pipe.pool_list(), scope)
+    if upgraded and used_scope:
+        # 填的是素材目录下的子目录（比如「镜头切片」），池里的条目指向原视频，
+        # 上溯一级已经取到素材了，项目里就记修正后的目录
+        scope = used_scope
     project["folders"] = list(scope)
-    cls = classify(items_in(scope), job=job)
+    if scope and not got:
+        raise RuntimeError("素材范围（%s）里没有素材。如果填的是素材目录下的子目录"
+                           "（比如「镜头切片」），改填它的上级目录再试"
+                           % "、".join(scope[:2]))
+    cls = classify(got, job=job)
     aroll_all, broll_all = list(cls["aroll"]), list(cls["broll"])
     aroll, broll = list(aroll_all), list(broll_all)
     skip_set: set[str] = set()

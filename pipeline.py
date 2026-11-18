@@ -911,7 +911,7 @@ def pool_health(items: list[dict] | None = None) -> dict:
                             "只能拿特写凑。" % (shot_count["全景"] + shot_count["远景"], wide)})
     if mid < 12 and total >= 15:
         adv.append({"level": "tip",
-                    "text": "中景只有 %d 条（%d%%），镜头之间缺过渡，容易特写硬切特写。"
+                    "text": "中景/近景只有 %d 条（%d%%），镜头之间缺过渡，容易特写硬切特写。"
                             % (shot_count["中景"] + shot_count["近景"], mid)})
     if out["top"] and out["top"][0]["pct"] >= 60:
         adv.append({"level": "tip",
@@ -2843,24 +2843,53 @@ def _scope_roots(folders) -> list[str]:
     return roots
 
 
-def scope_items(items: list[dict], folders) -> list[dict]:
-    """只保留落在这些目录下的素材。
-
-    给了范围就严格按范围过滤：范围本身为空 = 不限（老的手动用法）；
-    范围写了但一个目录都解析不出来，返回空——绝不悄悄退回整池，
-    那正是「柿饼素材混进腰果片子」的老毛病。
-    """
-    if not (folders or []):
-        return items
-    roots = _scope_roots(folders)
-    if not roots:
-        return []
+def _match_roots(items: list[dict], roots: list[str]) -> list[dict]:
     out = []
     for it in items:
         p = str(it.get("path") or "").lower()
         if any(p.startswith(r + "\\") or p.startswith(r + "/") for r in roots):
             out.append(it)
     return out
+
+
+def resolve_scope(items: list[dict], folders) -> tuple[list[dict], list[str], bool]:
+    """按目录取素材，返回 (素材, 实际用的目录, 是否上溯过)。
+
+    严格匹配为空时，把目录上溯一级再试——典型场景：切割器把切片导出到
+    `素材\\镜头切片`，用户在「素材文件夹」里填的就是这个子目录，但素材池里的
+    条目指向原视频（`素材\\1.mp4` + 起止时间），严格匹配就是 0 条，界面上却
+    显示池子里有几百条。只上溯一层，避免范围被越放越宽。
+
+    范围本身为空 = 不限（老的手动用法）；写了范围但一个目录都解析不出来 → 空，
+    绝不悄悄退回整池，那正是「柿饼素材混进腰果片子」的老毛病。
+    """
+    if not (folders or []):
+        return items, [], False
+    roots = _scope_roots(folders)
+    if not roots:
+        return [], [str(x) for x in folders], False
+    hit = _match_roots(items, roots)
+    if hit:
+        return hit, [str(x) for x in folders], False
+    ups: list[str] = []
+    for f in folders:
+        try:
+            par = str(Path(str(f)).resolve().parent)
+        except OSError:
+            continue
+        if par and par not in ups:
+            ups.append(par)
+    up_roots = _scope_roots(ups)
+    if up_roots:
+        hit = _match_roots(items, up_roots)
+        if hit:
+            return hit, ups, True
+    return [], [str(x) for x in folders], False
+
+
+def scope_items(items: list[dict], folders) -> list[dict]:
+    """只保留落在这些目录下的素材（含一级上溯兜底，见 resolve_scope）。"""
+    return resolve_scope(items, folders)[0]
 
 
 def _dirs_of_paths(paths) -> list[str]:
@@ -2943,10 +2972,14 @@ def align(project: dict, script: dict, cfg: dict, seed: int | None = None,
     if not scope:
         raise RuntimeError("这条脚本没记录素材来源。先在「加入素材」里填/选这次要用的文件夹，"
                            "再重新出一次方案——否则会从整个素材池里挑，容易混进别的商品")
-    items = scope_items(pool, scope)
+    items, used_scope, upgraded = resolve_scope(pool, scope)
     if not items:
         raise RuntimeError("素材范围里没有素材了（%s）。检查文件夹还在不在，或重新出一次方案"
                            % "、".join(scope[:2]))
+    if upgraded:
+        # 填的是素材目录下的子目录（比如「镜头切片」），池子里的条目其实指向原视频，
+        # 已经把范围修正成上级目录，这里固化下来，免得每次对齐都重新推一遍。
+        scope = used_scope
     script["folders"] = scope      # 固化到这条脚本上，以后换镜头也不会跑出这个范围
 
     v = cfg["video"]
@@ -3055,6 +3088,7 @@ def align(project: dict, script: dict, cfg: dict, seed: int | None = None,
             "pool": len(items),
             "dirs": sorted(src_dirs),
             "scope": scope, "guessed": guessed,   # 这次用的素材范围；guessed=按品名猜的
+            "scope_upgraded": upgraded,           # 填的是子目录，已按上级素材目录出片
         },
         "at": time.time(),
     }
@@ -3078,6 +3112,10 @@ def swap_clip(project: dict, script: dict, clip_index: int, cfg: dict) -> dict:
                            "（或目录已不在素材池里）")
     keys = _keys(_hint_of(script, cur.get("sentence", 0), cur.get("text", "")))
     ranked = sorted(items, key=lambda it: -_score(it, keys, {}, cur["want"], None))
+    # 只剩它自己时换个头就是原片，用户点了跟没点一样——直接说明情况
+    if len(ranked) < 2:
+        raise RuntimeError("这条素材所在的目录里没有别的素材可换"
+                           "（或目录已不在素材池里）")
     ids = [it["id"] for it in ranked]
     try:
         pos = ids.index(cur["item_id"])

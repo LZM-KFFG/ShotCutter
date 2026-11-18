@@ -3693,6 +3693,10 @@ class Handler(BaseHTTPRequestHandler):
                 p["folders"] = fdirs
             try:
                 plan = pipe.align(p, s, pipe.load_cfg(), folders=fdirs or None)
+                # 填成子目录（素材\镜头切片）时 align 会自动上溯一级，把修正后的
+                # 范围回写到项目，界面上的「本片范围」才不会一直挂着那个空目录
+                if (plan.get("stats") or {}).get("scope"):
+                    p["folders"] = plan["stats"]["scope"]
                 pipe.project_save(p)
                 self._json({"ok": True, "plan": plan})
             except Exception as exc:  # noqa: BLE001
