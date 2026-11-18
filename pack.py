@@ -25,8 +25,10 @@ OUT = HERE / "dist" / "ShotCutter-portable"
 
 CODE_FILES = ["app.py", "pipeline.py", "director.py", "qc.py", "vsr_runner.py",
               "launch.py", "launcher.py", "requirements.txt", "app.ico", "README.md",
-              "start.bat", "serve.bat"]
-CODE_DIRS = ["web", "samples"]
+              "start.bat", "serve.bat",
+              # 分发二进制时附上协议与文档：AGPL 要求随包提供许可证
+              "LICENSE", "CLA.md", "AGENTS.md"]
+CODE_DIRS = ["web", "samples", "docs"]
 
 SETUP_PY = r'''# -*- coding: utf-8 -*-
 """建虚拟环境 + 离线装依赖 + 放好 ffmpeg。由「安装.bat」调用。"""
@@ -372,7 +374,8 @@ def build_embed(refresh_wheels: bool, zip_it: bool = False) -> int:
 
 def copy_item(src: Path, dst: Path) -> None:
     if src.is_dir():
-        shutil.copytree(src, dst)
+        # 跳过调试残留（web/_p4.html 这种）和字节码缓存，别把开发垃圾打进包
+        shutil.copytree(src, dst, ignore=shutil.ignore_patterns("_*", "__pycache__", "*.pyc"))
     else:
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
