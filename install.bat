@@ -55,5 +55,5 @@ if exist ".venv\Scripts\ffmpeg.exe" (
 )
 
 echo.
-echo 安装完成，双击「启动.bat」即可使用（默认打开 http://127.0.0.1:8777）
+echo 安装完成，双击「start.bat」即可使用（默认打开 http://127.0.0.1:8777）
 pause

@@ -72,12 +72,16 @@
 git clone https://github.com/LZM-KFFG/ShotCutter.git
 cd ShotCutter
 install.bat        :: 建 .venv + 装依赖（首次 3~8 分钟）
-启动.bat            :: 启动服务并打开浏览器
+start.bat          :: 启动服务并打开浏览器
 ```
 
 默认地址 `http://127.0.0.1:8777`；端口被占用时会自动往后顺延，实际端口看控制台。
 
 **ffmpeg 放哪**：程序会依次找 `.venv\Scripts\ffmpeg.exe`、`tools\ffmpeg.exe`、项目根目录，最后找 PATH。最省事的做法是把 `ffmpeg.exe` 拷进 `.venv\Scripts\`。
+
+> 更细的步骤——ffmpeg 怎么装、VSR / video2x / 本地模型怎么接、装完怎么逐项验证、报错对照表——见 **[安装教程](docs/INSTALL.md)**。
+>
+> 想让 AI 编码代理（Claude Code / Codex / Cursor 等）帮你改这个项目，把 **[AGENTS.md](AGENTS.md)** 交给它：里面写了目录职责、必须遵守的约束和哪些坑已经踩过。
 
 ## 可选组件
 
@@ -152,11 +156,13 @@ ShotCutter/
 ├─ pack.py           打包脚本（便携版 / 免安装版）
 ├─ web/              六个页面（home / index / sub / hd / one / pipe）
 ├─ samples/          演示素材
-├─ docs/images/      README 截图
+├─ docs/             README 截图（images/）、安装教程（INSTALL.md）
 ├─ install.bat       首次安装
-├─ 启动.bat           日常启动
+├─ start.bat         日常启动
 ├─ LICENSE           AGPL-3.0 协议原文
 ├─ CLA.md            贡献者许可协议
+├─ AGENTS.md         给 AI 编码代理的项目说明
+├─ CLAUDE.md         Claude Code 入口（指向 AGENTS.md）
 └─ requirements.txt
 ```
 
@@ -174,7 +180,7 @@ ShotCutter/
 ## 常见问题
 
 **提示「没装转录引擎 faster-whisper」**
-九成是用了系统 Python 启动，而不是项目的 `.venv`。用 `启动.bat`（或 `.venv\Scripts\python.exe app.py`）就不会。
+九成是用了系统 Python 启动，而不是项目的 `.venv`。用 `start.bat`（或 `.venv\Scripts\python.exe app.py`）就不会。
 
 **字幕去除看起来在用 CPU**
 Windows 任务管理器的 GPU 图默认显示 3D 引擎，CUDA 工作在另一个引擎里。切到「Cuda / Compute」看，或者看 `nvidia-smi`。页面头部与任务日志第一行都会打印实际用的设备。
@@ -186,7 +192,7 @@ Windows 任务管理器的 GPU 图默认显示 3D 引擎，CUDA 工作在另一�
 服务会从 8777 往后找可用端口，控制台会打印实际地址。
 
 **中文显示成乱码**
-用 `启动.bat`（内含 `chcp 65001`）。子进程日志已做 UTF-8 / GBK 自适应解码。
+用 `start.bat`（内含 `chcp 65001`）。子进程日志已做 UTF-8 / GBK 自适应解码。
 
 ## 说明与致谢
 
