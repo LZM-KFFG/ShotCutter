@@ -9,6 +9,7 @@
 [![Python](https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows-0078D6?logo=windows&logoColor=white)](#)
 [![Local](https://img.shields.io/badge/100%25%20Local-No%20Cloud-2E7D5B)](#)
+[![Release](https://img.shields.io/github/v/release/LZM-KFFG/ShotCutter?color=C13B1B)](https://github.com/LZM-KFFG/ShotCutter/releases)
 [![License](https://img.shields.io/badge/License-AGPL%20v3-C13B1B)](LICENSE)
 [![Commercial](https://img.shields.io/badge/Commercial-License%20Available-2E7D5B)](#版权与商业授权)
 
