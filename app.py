@@ -3758,7 +3758,9 @@ class Handler(BaseHTTPRequestHandler):
                 variants = 1
             opts = {"variants": variants,
                     "redo_tts": bool(payload.get("redo_tts")),
-                    "realign": payload.get("realign", True)}
+                    "realign": payload.get("realign", True),
+                    # 空 = 各脚本按原样；"-" = 这批不配 BGM；否则是曲名
+                    "bgm": str(payload.get("bgm") or "").strip()}
             job = new_job("batch", max(1, len(idxs) * variants))
             threading.Thread(target=_run_job,
                              args=(job, pipe.batch_worker, p, idxs, pipe.load_cfg(), job, opts),

@@ -343,7 +343,8 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
   min-height:260px;max-height:min(58vh,520px);display:flex;align-items:center;justify-content:center;
   overflow:hidden;padding:8px}
 #hp-img{max-width:100%;max-height:calc(min(58vh,520px) - 18px);width:auto;height:auto;display:block;border-radius:7px}
-.hp-stage .hp-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+.hp-stage .hp-empty{position:absolute;inset:0;display:flex;flex-direction:column;gap:12px;
+  align-items:center;justify-content:center;
   color:#8B8578;font-size:12px;text-align:center;padding:24px;line-height:1.9;white-space:pre-line}
 .hp-stage.has-img .hp-empty{display:none}
 .hp-stage:not(.has-img) #hp-img{display:none}
@@ -856,8 +857,17 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
         </select></div>
       <div><label class="f">分镜</label>
         <select id="bm-align">
-          <option value="1">每版重新随机</option><option value="0">保留已调好的</option>
+          <option value="1">每版重新换一批镜头</option><option value="0">第一版保留已调好的</option>
         </select></div>
+    </div>
+
+    <div style="margin-top:10px">
+      <label class="f">BGM（这批统一配）</label>
+      <select id="bm-bgm">
+        <option value="">跟随各脚本 / 全局设置</option>
+        <option value="-">不配 BGM</option>
+      </select>
+      <div class="hintline" id="bm-bgm-hint">曲子来自「BGM 曲库」（第 4 步里可以加音乐文件夹）</div>
     </div>
 
     <div class="row" style="margin-top:16px">
@@ -2243,7 +2253,32 @@ function openBatch(){
   $("#bm-bar").style.display = "none";
   $("#bm-go").disabled = false;
   renderBmList();
+  fillBmBgm();
   $("#bm").classList.add("on");
+}
+/* 批量出片可以统一指定 BGM：曲目从 BGM 曲库读，选了就给这批每条成片都配上 */
+async function fillBmBgm(){
+  const sel = $("#bm-bgm"), hint = $("#bm-bgm-hint");
+  if(!sel) return;
+  while(sel.options.length > 2) sel.remove(2);   // 留「跟随」「不配」两项
+  sel.value = "";
+  const r = await apiQuick("/api/pipe/bgm/list");
+  const items = (r && r.items) || [];
+  if(!items.length){
+    const o = document.createElement("option");
+    o.value = ""; o.disabled = true;
+    o.textContent = "（曲库是空的：先在第 4 步加音乐文件夹）";
+    sel.appendChild(o);
+    if(hint) hint.textContent = "没有可用曲目，这批会按各脚本原有设置走";
+    return;
+  }
+  items.forEach(it=>{
+    const o = document.createElement("option");
+    o.value = it.name;
+    o.textContent = it.name + (it.dur ? "　" + fmtDur(it.dur) : "");
+    sel.appendChild(o);
+  });
+  if(hint) hint.textContent = "曲库里有 " + items.length + " 首；选一首会给这批每条成片都配上";
 }
 function bmCount(){
   const n = S.bmSel.size, v = +$("#bm-var").value || 1;
@@ -2289,17 +2324,21 @@ $("#bm-go").onclick = async ()=>{
   const variants = +$("#bm-var").value || 1;
   const total = idxs.length * variants;
   const mins = Math.max(1, Math.ceil(total * 10 / 60));
+  const bgmSel = $("#bm-bgm") ? $("#bm-bgm").value || "" : "";
+  const bgmTxt = bgmSel === "" ? "跟随脚本设置" : (bgmSel === "-" ? "不配 BGM" : bgmSel);
   if(!confirm("开始批量出片？\n\n" + idxs.length + " 条脚本 × 每脚本 " + variants + " 版 = " + total + " 条成片\n" +
               "预计 " + mins + " 分钟左右（本机渲染，可以挂着去做别的）\n\n" +
               "配音：" + ($("#bm-tts").value === "1" ? "全部重做" : "缺的才补") + "\n" +
-              "分镜：" + ($("#bm-align").value === "1" ? "每版自动换一批镜头" : "第一版保留已调好的，其余版本仍会换镜头"))) return;
+              "分镜：" + ($("#bm-align").value === "1" ? "每版自动换一批镜头" : "第一版保留已调好的，其余版本仍会换镜头") + "\n" +
+              "BGM：" + bgmTxt)) return;
   $("#bm-go").disabled = true;
   $("#bm-out").innerHTML = "";
   $("#bm-msg").textContent = "提交中…";
   const r = await api("/api/pipe/batch", {
     pid:S.pid, idxs, variants,
     redo_tts: $("#bm-tts").value === "1",
-    realign: $("#bm-align").value === "1"
+    realign: $("#bm-align").value === "1",
+    bgm: bgmSel
   });
   if(r.error){ toast(r.error); $("#bm-go").disabled = false; $("#bm-msg").textContent = ""; return; }
   $("#bm-bar").style.display = "block";
@@ -2363,6 +2402,8 @@ async function openSubPv(pid, idx){
 async function loadSubPv(){
   $("#hp-list").innerHTML = "";
   $("#hp-msg").textContent = "读取字幕…";
+  const emptyEl = $("#hp-empty");
+  if(emptyEl) emptyEl.textContent = "点左边的字幕条目，这里显示那一刻的画面";
   const r = await api("/api/pipe/sub/cues?pid=" + encodeURIComponent(SUBPV.pid) + "&idx=" + SUBPV.idx);
   if(r.error){ $("#hp-msg").textContent = r.error; return; }
   const rows = [];
@@ -2384,7 +2425,24 @@ async function loadSubPv(){
   if(r.clips === 0){   // 旧后端不返回 clips，undefined 时照常预览
     const stage = document.querySelector(".hp-stage"), empty = $("#hp-empty");
     if(stage) stage.classList.remove("has-img");
-    if(empty) empty.textContent = "这条脚本还没生成分镜（点「出方案」或去流水线第 3 步对齐），先看字幕清单就好。";
+    if(empty){
+      // 没分镜就取不到画面：给一句人话 + 一个按钮，不用退出去找对齐入口
+      empty.innerHTML = "";
+      const t = mk("div", "", "这条脚本还没有分镜，预览取不到画面");
+      t.style.marginBottom = "10px";
+      const btn = mk("button", "g sm", "现在对齐再预览");
+      btn.onclick = async ()=>{
+        btn.disabled = true; btn.textContent = "对齐中…";
+        const rr = await api("/api/pipe/align",
+          {pid: SUBPV.pid, idx: SUBPV.idx, folders: folderLines()});
+        if(rr.error){ btn.disabled = false; btn.textContent = "现在对齐再预览"; toast(rr.error, 6500); return; }
+        await reloadProject();
+        toast("对齐完成：" + rr.plan.clips.length + " 个镜头", 3500);
+        loadSubPv();
+      };
+      empty.appendChild(t);
+      empty.appendChild(btn);
+    }
     $("#hp-tip").textContent = "没有分镜，暂时取不到画面";
     return;
   }

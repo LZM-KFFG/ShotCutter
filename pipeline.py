@@ -2974,6 +2974,15 @@ def align(project: dict, script: dict, cfg: dict, seed: int | None = None,
                            "再重新出一次方案——否则会从整个素材池里挑，容易混进别的商品")
     items, used_scope, upgraded = resolve_scope(pool, scope)
     if not items:
+        # 范围写死了但池子里已经没这批素材（换了商品、旧目录被清掉）：
+        # 按品名再认一次，唯一命中就用。否则批量出片会卡在「范围内没有素材」，
+        # 而人明明已经把新素材扫进池子了。
+        alt = guess_scope((project or {}).get("name") or script.get("title"), pool)
+        if alt and _scope_roots(alt) != _scope_roots(scope):
+            hit = _match_roots(pool, _scope_roots(alt))
+            if hit:
+                items, scope, used_scope, upgraded, guessed = hit, alt, alt, False, True
+    if not items:
         raise RuntimeError("素材范围里没有素材了（%s）。检查文件夹还在不在，或重新出一次方案"
                            % "、".join(scope[:2]))
     if upgraded:
@@ -3234,6 +3243,22 @@ def bgm_pick(cfg: dict | None = None) -> str:
     return items[0]["path"] if items else ""
 
 
+def bgm_by_name(name: str, cfg: dict | None = None) -> str:
+    """按曲名/路径在 BGM 库里找实际文件（批量出片统一指定曲目时用）。"""
+    name = str(name or "").strip()
+    if not name:
+        return ""
+    try:
+        if Path(name).exists():
+            return name
+    except OSError:
+        pass
+    for it in bgm_list(cfg):
+        if it["name"] == name or it["path"] == name:
+            return it["path"]
+    return ""
+
+
 def _ass_escape(t: str) -> str:
     return t.replace("{", "（").replace("}", "）").replace("\\", "／")
 
@@ -3419,7 +3444,8 @@ def _voice_ok(script: dict) -> bool:
         return False
 
 
-def compose_worker(project: dict, script: dict, cfg: dict, job: dict, variant: str = "") -> None:
+def compose_worker(project: dict, script: dict, cfg: dict, job: dict, variant: str = "",
+                   bgm_override: str | None = None) -> None:
     v = cfg["video"]
     W, H, FPS = int(v["w"]), int(v["h"]), int(v["fps"])
     plan = script.get("plan") or {}
@@ -3475,11 +3501,18 @@ def compose_worker(project: dict, script: dict, cfg: dict, job: dict, variant: s
 
     ai = len(clips)
     inputs += ["-i", str(Path(audio).resolve())]
-    bgm = ""
-    try:
-        bgm = bgm_pick(cfg)
-    except Exception:
-        bgm = (v.get("bgm") or "").strip()
+    # BGM 取值：本次渲染临时指定（批量出片统一选曲，"-" = 明确不要）→ 脚本自己定的 → 全局配置
+    raw_bgm = bgm_override if bgm_override is not None else (
+        script.get("bgm") if "bgm" in script else None)
+    if raw_bgm == "-":
+        bgm = ""
+    elif raw_bgm:
+        bgm = bgm_by_name(str(raw_bgm), cfg) or str(raw_bgm)
+    else:
+        try:
+            bgm = bgm_pick(cfg)
+        except Exception:
+            bgm = (v.get("bgm") or "").strip()
     if not (bgm and Path(bgm).exists()):
         bgm = ""
     if bgm:
@@ -3625,6 +3658,8 @@ def batch_worker(project: dict, idxs: list, cfg: dict, job: dict,
     variants = max(1, min(20, int(opts.get("variants") or 1)))
     redo_tts = bool(opts.get("redo_tts"))
     realign = bool(opts.get("realign", True))
+    # 批量统一指定 BGM：只作用于这一批，不写回脚本（免得以后单条渲染还带着它）
+    bgm_opt = str(opts.get("bgm") or "").strip()
     unit_total = len(valid) * variants
     job["total"] = unit_total
     job["done"] = 0
@@ -3636,6 +3671,7 @@ def batch_worker(project: dict, idxs: list, cfg: dict, job: dict,
     # 以前每个版本只是换个 seed，打分的随机抖动才 0.35，压不过内容/景别那几分，
     # 于是「每脚本 3 版」出来的三条片子镜头几乎一样——批量出片最常被吐槽的就是这个。
     shared_use: dict = {}
+    fixed_scope: set[int] = set()   # 哪些脚本的范围是按品名重新锁定的，最后告诉用户
 
     for k, i in enumerate(valid):
         s = scripts[i]
@@ -3682,13 +3718,17 @@ def batch_worker(project: dict, idxs: list, cfg: dict, job: dict,
                 has_plan = bool((s.get("plan") or {}).get("clips"))
                 if realign or v > 0 or not has_plan:
                     vprog(0.02, "选镜头…")
-                    align(project, s, cfg, seed=None if v == 0 else (i + 1) * 100 + v,
-                          used=shared_use)
+                    plan = align(project, s, cfg,
+                                 seed=None if v == 0 else (i + 1) * 100 + v,
+                                 used=shared_use)
+                    if (plan.get("stats") or {}).get("guessed"):
+                        fixed_scope.add(i)
                     project_save(project)
                 n_clip = len((s.get("plan") or {}).get("clips") or [])
                 vprog(0.28, "渲染 %d 个镜头…" % n_clip)
                 sub = _SubJob(lambda f: vprog(0.28 + 0.72 * f, "渲染 %d%%" % int(f * 100)))
-                compose_worker(project, s, cfg, sub, variant=tag)
+                compose_worker(project, s, cfg, sub, variant=tag,
+                               bgm_override=(bgm_opt or None))
                 r = sub.get("result") or {}
                 made.append({"idx": i, "angle": label, "variant": v + 1,
                              "name": r.get("name"), "out": r.get("out"), "dur": r.get("dur"),
@@ -3716,6 +3756,8 @@ def batch_worker(project: dict, idxs: list, cfg: dict, job: dict,
         raise RuntimeError("一条都没出来：%s" % (failed[0]["error"] if failed else "未知原因"))
     job["message"] = "批量完成：%d 条成片，%d 条失败（%d 个脚本 × 每脚本 %d 版）" % (
         len(made), len(failed), len(valid), variants)
+    if fixed_scope:
+        job["message"] += "；%d 条脚本原素材范围在池子里已空，按品名重新锁定" % len(fixed_scope)
     job["state"] = "done"
     job["progress"] = 1.0
 
