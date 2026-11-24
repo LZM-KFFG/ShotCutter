@@ -2823,7 +2823,13 @@ def _score(item: dict, keys: list[str], usage: dict, want: float, last: dict | N
     if avail >= want:
         s += 0.9
     else:
-        s -= min(3.2, (want - avail) / max(0.15, want) * 3.2)
+        # 素材比镜头短，合成时补不齐的部分只能靠 tpad 复制最后一帧硬凑——
+        # 成片上就是画面卡住一两秒。以前这里最多扣 3.2，压不过景别 +4.2 和
+        # 关键词 +2.2，匹配度高的短素材照样会赢，于是每批都带着几段定格。
+        # 现在基础扣 8 分、按缺口比例最多再扣 10 分，短素材排在够长的素材后面；
+        # 同一句候选全都短时，缺得最多的那个罚得最狠，仍然会挑最长的来用。
+        gap_ratio = min(1.0, max(0.0, (want - avail) / max(0.15, want)))
+        s -= 8.0 + gap_ratio * 10.0
     s -= usage.get(item["id"], 0) * 2.6
     if last:
         if item["path"] == last["path"] and abs(item["index"] - last.get("index", 0)) <= 1:
@@ -3051,8 +3057,13 @@ def align(project: dict, script: dict, cfg: dict, seed: int | None = None,
                 ss = round(pick["start"] + (rnd.uniform(0, room) if room > 0.25 else room / 2), 3)
                 src = round(seg, 3)
             else:
-                ss = round(pick["start"], 3)
-                src = round(avail, 3)
+                # 这一条比镜头短。以前直接把 src 记成 avail 就完事，缺口留给合成阶段
+                # 用 tpad 复制最后一帧硬补——成片上就是画面卡住一两秒。
+                # 改成把取用起点往前挪，用同一条素材前面的画面把长度补够：
+                # 池子是按场景切片的，往前挪只是借用上一个场景的画面，画面本身还是动的。
+                back = min(seg - avail, pick["start"])
+                ss = round(pick["start"] - back, 3)
+                src = round(avail + back, 3)
             clips.append({
                 "sentence": si, "text": s["text"], "start": round(st + k * seg, 3),
                 "dur": round(seg, 3), "kind": "video", "path": pick["path"],
@@ -3071,8 +3082,17 @@ def align(project: dict, script: dict, cfg: dict, seed: int | None = None,
     diff = round(total - acc, 3)
     if clips and abs(diff) > 0.02:
         if diff > 0:
-            clips[-1]["dur"] = round(clips[-1]["dur"] + diff, 3)
-            clips[-1]["want"] = clips[-1]["dur"]
+            tail = clips[-1]
+            tail["dur"] = round(tail["dur"] + diff, 3)
+            tail["want"] = tail["dur"]
+            # 末镜被拉长，src 却停在原地：多出来的这几百毫秒合成时只能复制末帧，
+            # 于是每条片的最后一镜都在结尾卡一下。能往前借画面就借。
+            need = round(float(tail["dur"]) - float(tail.get("src") or 0.0), 3)
+            if need > 0.02:
+                back = min(need, float(tail.get("ss") or 0.0))
+                if back > 0:
+                    tail["ss"] = round(float(tail["ss"]) - back, 3)
+                    tail["src"] = round(float(tail["src"]) + back, 3)
         else:
             while clips and -diff > 0.05 and clips[-1]["dur"] + diff > 0.3:
                 clips[-1]["dur"] = round(clips[-1]["dur"] + diff, 3)
@@ -3139,8 +3159,10 @@ def swap_clip(project: dict, script: dict, clip_index: int, cfg: dict) -> dict:
         cur["ss"] = round(nxt["start"] + max(0.0, (avail - seg) / 2), 3)
         cur["src"] = round(seg, 3)
     else:
-        cur["ss"] = round(nxt["start"], 3)
-        cur["src"] = round(avail, 3)
+        # 同对齐：换到一条更短的素材时往前借画面，别把缺口丢给合成的定格补帧
+        back = min(seg - avail, nxt["start"])
+        cur["ss"] = round(nxt["start"] - back, 3)
+        cur["src"] = round(avail + back, 3)
     cur["path"], cur["item_id"], cur["item_name"] = nxt["path"], nxt["id"], nxt["name"]
     cur["tags"] = nxt.get("tags") or []
     script["plan"] = plan
