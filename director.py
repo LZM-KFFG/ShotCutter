@@ -1345,7 +1345,13 @@ def director_worker(job: dict, project: dict, product: dict, target: float = 45.
             # audio_N 目录的。以前这里没设，三条方案全默认 idx=0，配音一个覆盖一个，
             # 最后三条成片共用同一条音轨——文案和声音、时长全对不上。
             sc["idx"] = len(project.get("scripts") or []) + len(made)
-            tts_script(project, sc, cfg, job)
+            try:
+                tts_script(project, sc, cfg, job)
+            except Exception as exc:  # noqa: BLE001
+                # 配音失败（断网 / 没装 edge-tts / 音色不可用）不该把整条方案丢掉：
+                # 文案是好的，先留住这张卡片，页面上有「重配」可以重试。
+                sc["tts_note"] = "配音失败：%s" % pipe._short(str(exc), 140)
+                note = (note + "；" if note else "") + "配音失败，可点「重配」再试"
             sc["route"] = "script"
             sc["seed"] = v + seed
             sc["visual_mix"] = 0.0

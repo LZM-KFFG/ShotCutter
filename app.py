@@ -2154,18 +2154,23 @@ def plan_view(p: dict) -> list[dict]:
     for i, s in enumerate(p.get("scripts") or []):
         t = s.get("tts") or {}
         sents = t.get("sentences") or []
+        # 配音失败时 tts 是空的，卡片还得显示文案——退回脚本自己的句子
+        plain = s.get("sentences") or []
         out.append({
             "idx": i,
             "route": s.get("route") or "source",
             "angle": s.get("angle_label") or "",
             "total": round(float(t.get("total") or 0), 1),
-            "count": len(sents),
+            "count": len(sents) or len(plain),
             "source": s.get("source_name") or "",
             "seed": int(s.get("seed") or 0),
             "note": s.get("note") or "",
             "numbers": s.get("check_numbers") or [],
-            "lines": [str(x.get("text") or "") for x in sents],
+            "lines": [str(x.get("text") or "") for x in (sents or plain)],
             "why": ((s.get("picks") or [{}])[0].get("why") or ""),
+            # 有没有配音：没有的话卡片上要给「重配」入口，别只留个 0 秒
+            "voice_ok": bool(t.get("audio")),
+            "voice_note": s.get("tts_note") or "",
         })
     return out
 

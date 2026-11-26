@@ -433,6 +433,15 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
           <option value="0.9">0.9 秒</option>
           <option value="1.5">1.5 秒</option>
         </select></div>
+      <div style="width:120px"><label class="f">配音语速</label>
+        <select id="one-rate" title="AI 配音的语速；只影响之后新出的方案，原声直剪不受影响">
+          <option value="-10%">慢 10%</option>
+          <option value="-5%">稍慢 5%</option>
+          <option value="+0%">正常</option>
+          <option value="+5%">稍快 5%</option>
+          <option value="+8%">快 8%</option>
+          <option value="+15%">很快 15%</option>
+        </select></div>
     </div>
     <div class="row" style="margin-top:14px">
       <button class="b" id="btn-one">出方案</button>
@@ -493,6 +502,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
     <div class="hintline" style="margin-top:6px">「试听」是 BGM 原曲；「试听混音」是<b>配音 + BGM 按下面的音量混 20 秒</b>，和成片里的听感一致，调完参数不用反复出片</div>
     <div class="row" style="margin-top:6px">
       <button class="b sm" id="btn-mix-play">试听混音</button>
+      <select id="mix-idx" style="width:180px" title="用哪条方案的人声来试听"></select>
       <audio id="mix-audio" controls preload="none" style="flex:1;min-width:220px;height:34px"></audio>
     </div>
     <div class="hintline" id="mix-msg" style="margin-top:4px"></div>
@@ -832,7 +842,16 @@ async function loadCfg(){
     b.classList.toggle("on", +b.dataset.w === +v.w && +b.dataset.h === +v.h);
   });
   syncTailUi();
+  syncRateUi(c);
   renderLlmChip(c);
+}
+/* 配音语速：读 config 的 tts.rate，选个最接近的档位显示 */
+function syncRateUi(c){
+  const sel = $("#one-rate"); if(!sel) return;
+  const raw = String(((c || S.cfg || {}).tts || {}).rate || "+0%");
+  const pct = parseInt(raw.replace(/[^-\d]/g, ""), 10) || 0;
+  const hit = [...sel.options].find(o => (parseInt(o.value.replace(/[^-\d]/g, ""), 10) || 0) === pct);
+  sel.value = hit ? hit.value : "+0%";
 }
 async function saveCfg(){
   const r = await api("/api/pipe/config", {
@@ -1150,7 +1169,10 @@ async function mixPreview(bgm, note, onlineFn){
   const btn = $("#btn-mix-play"), msg = $("#mix-msg"), a = $("#mix-audio");
   msg.textContent = note || "";
   const pid = PLAN.pid || "";
-  const idx = (PLAN.plans[0] && PLAN.plans[0].idx) || 0;
+  if(!(PLAN.plans || []).length){ toast("先出方案，才有配音可以混", 3000); return; }
+  const pick = $("#mix-idx");
+  const idx = (pick && pick.value !== "") ? +pick.value
+            : ((PLAN.plans[0] && PLAN.plans[0].idx) || 0);
   btn.disabled = true;
   btn.textContent = "混音中…";
   try{
@@ -1190,6 +1212,29 @@ $("#btn-mix-play").onclick = ()=>{
   mixPreview(bgm, "");
 };
 /* 参数动了之后提醒重新听一次（缓存的旧混音不代表新音量） */
+/* 试听混音可以指定用哪条方案的人声，别老是拿第一条推荐方案 */
+function renderMixPicker(){
+  const sel = $("#mix-idx"); if(!sel) return;
+  const keep = sel.value;
+  sel.innerHTML = "";
+  (PLAN.plans || []).forEach((p, i)=>{
+    const o = mk("option", null, "方案 " + String.fromCharCode(65 + i) + " · " +
+      (p.route === "source" ? "原声直剪" : (p.angle || "AI 配音")));
+    o.value = String(p.idx);
+    sel.appendChild(o);
+  });
+  if(!sel.options.length){
+    const o = mk("option", null, "还没有方案"); o.value = ""; sel.appendChild(o);
+    return;
+  }
+  if(keep && [...sel.options].some(o=> o.value === keep)) sel.value = keep;
+}
+$("#mix-idx").onchange = ()=>{
+  if($("#mix-audio").getAttribute("src")){
+    $("#mix-msg").textContent = "换了方案，重新点「试听混音」听这条的人声";
+  }
+};
+
 ["#bgm-vol", "#voice-vol", "#bgm-fade"].forEach(id=>{
   $(id).addEventListener("input", ()=>{
     if($("#mix-audio").getAttribute("src")) $("#mix-msg").textContent = "参数变了，重新点「试听混音」听新的效果";
@@ -1827,8 +1872,8 @@ function renderPlans(){
     if(i === 0) tag.appendChild(mk("span", "badge", "推荐"));
     card.appendChild(tag);
 
-    const big = mk("div", "big", String(p.total || 0));
-    big.appendChild(mk("i", null, " 秒"));
+    const big = mk("div", "big", p.total ? String(p.total) : "—");
+    big.appendChild(mk("i", null, p.total ? " 秒" : " 未配音"));
     card.appendChild(big);
     card.appendChild(mk("div", "meta",
       p.count + " 句 · " + (p.route === "source" ? "原声直剪" : ("AI 配音 · " + (p.angle || "")))
@@ -1847,11 +1892,17 @@ function renderPlans(){
         p.numbers.slice(0, 3).join("、") + " 商品信息里没有，播前核对"));
     }
     if(p.edited) card.appendChild(mk("div", "warn", "文案改过，渲染时会重新配音，时长会变"));
+    // voice_ok 是后端新加的字段；老后端没这个字段（undefined）时按「有配音」处理，别乱报警
+    if(p.voice_ok === false) card.appendChild(mk("div", "warn",
+      (p.voice_note || "这条还没配音") + "（点下面的「重配」再试）"));
 
     const acts = mk("div", "acts");
     const pv = mk("button", "g sm", "字幕");
     pv.title = "预览这条方案的字幕，顺便调黄色标题字幕";
     pv.onclick = ()=> openSubPv(PLAN.pid, p.idx);
+    const retts = mk("button", "g sm", p.voice_ok === false ? "配音" : "重配");
+    retts.title = "重新生成这条的配音：断网/音色不可用导致失败，或改了语速之后用";
+    retts.onclick = ()=> rettsPlan(p, retts);
     const edit = mk("button", "g sm", "改词");
     edit.title = "直接改文案；保存后渲染时会按新文案自动重配配音";
     edit.onclick = ()=> openPlanEditor(p, card, lines, acts);
@@ -1859,11 +1910,56 @@ function renderPlans(){
     redo.onclick = ()=> genPlans(p.idx, (p.seed || 0) + 1);
     const go1 = mk("button", "b sm go-render", "渲染");
     go1.onclick = ()=> renderIdxs([p.idx]);
-    acts.appendChild(pv); acts.appendChild(edit); acts.appendChild(redo); acts.appendChild(go1);
+    acts.appendChild(pv); acts.appendChild(retts); acts.appendChild(edit);
+    acts.appendChild(redo); acts.appendChild(go1);
     card.appendChild(acts);
     grid.appendChild(card);
   });
   box.appendChild(grid);
+  renderMixPicker();
+}
+
+/* 重配：只重跑这一条的配音，不重出方案。配音失败、或改了语速之后用 */
+async function rettsPlan(p, btn){
+  if(!PLAN.pid) return;
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = "配音中…";
+  const busy = $("#plan-busy");
+  if(busy){ busy.hidden = false; busy.textContent = "正在给这条方案配音…"; }
+  try{
+    const r = await api("/api/pipe/tts", {pid: PLAN.pid, idx: p.idx});
+    if(r.error){ toast(r.error, 4000); return; }
+    const j = await pollJob(r.job, jj=>{
+      const pct = Math.round((jj.progress || 0) * 100);
+      btn.textContent = "配音 " + pct + "%";
+      if(busy) busy.textContent = "配音中 " + pct + "%　" + (jj.message || "");
+    });
+    if(j.state === "error"){
+      toast("配音失败：" + (j.error || "未知原因"), 6000);
+      if(busy) busy.textContent = "配音失败：" + (j.error || "");
+      return;
+    }
+    // 配音变了，时长/句数要跟着刷新
+    const pr = await api("/api/pipe/project?id=" + encodeURIComponent(PLAN.pid));
+    const sc = pr.project && (pr.project.scripts || [])[p.idx];
+    if(sc){
+      const t = sc.tts || {};
+      p.lines = (t.sentences || sc.sentences || []).map(x=> x.text || "");
+      p.count = p.lines.length;
+      p.total = t.total ? Math.round(t.total * 10) / 10 : 0;
+      p.voice_ok = !!t.audio;
+      p.voice_note = "";
+      p.edited = false;
+      p.seed = p.seed || 0;
+    }
+    toast("配音完成" + (p.total ? "：" + p.total + " 秒" : ""), 2600);
+    renderPlans();
+  }catch(e){
+    toast("配音失败：" + e.message, 5000);
+  }finally{
+    btn.disabled = false; btn.textContent = label;
+    const bb = $("#plan-busy"); if(bb) bb.hidden = true;
+  }
 }
 
 /* 改词：直接在卡片里编辑句子，存回项目；渲染时 compose 会发现配音指纹对不上，
@@ -2093,6 +2189,13 @@ function syncTailUi(){
   const hit = [...sel.options].find(o=> Math.abs(+o.value - cur) < 0.001);
   sel.value = hit ? hit.value : "0.6";
 }
+$("#one-rate").onchange = async e=>{
+  const val = e.target.value;
+  const r = await api("/api/pipe/config", {tts:{rate: val}});
+  if(r.error){ toast(r.error, 3000); return; }
+  S.cfg = r.config;
+  toast("语速 " + val + " 已保存：之后新出的方案按这个配音；已出的方案要「重挑」或重配才会变", 4200);
+};
 $("#one-tail").onchange = async e=>{
   const val = +e.target.value || 0;
   const r = await api("/api/pipe/config", {video:{ tail_hold: val }});
@@ -2110,6 +2213,7 @@ $("#one-tail").onchange = async e=>{
   setupFolderDrop($("#one-folders"), $("#one-dir-msg"), "pipe_one_folders");
   await loadCfg();
   loadBgm();
+  renderMixPicker();
   renderOut();
   const qs = new URLSearchParams(location.search);
   if(qs.get("cfg")){ $("#modal").classList.add("on"); refreshLstat(); }

@@ -2557,6 +2557,19 @@ def _tts_edge(text: str, voice: str, rate: str, out_mp3: Path) -> list[dict]:
     return bounds
 
 
+def _rate_to_sapi(rate: str) -> int:
+    """把 edge-tts 的 "+8%" 换算成 SAPI 的 -10..10 档位。
+
+    没装 edge-tts 或断网时会回落到 Windows 离线语音，那条链路原来把 rate 丢了，
+    界面上的语速设置等于白调。粗算 20% ≈ 4 档，够用。
+    """
+    try:
+        pct = int(re.sub(r"[^-\d]", "", str(rate)) or "0")
+    except ValueError:
+        pct = 0
+    return max(-10, min(10, int(round(pct / 5.0))))
+
+
 def _sapi_tts(sentences: list[str], out_wav: Path, workdir: Path, rate: int = 2) -> list[float]:
     """Windows 离线兜底：逐句合成，拼接，返回每句时长。"""
     ps = workdir / "tts.ps1"
@@ -2635,7 +2648,7 @@ def tts_worker(project: dict, script: dict, cfg: dict, job: dict) -> None:
             audio = mp3
         else:
             out_wav = adir / "tts.wav"
-            durs = _sapi_tts(texts, out_wav, adir)
+            durs = _sapi_tts(texts, out_wav, adir, _rate_to_sapi(rate))
             timings, t = [], 0.0
             for i, d in enumerate(durs):
                 timings.append({"text": texts[i], "start": round(t, 3), "end": round(t + d, 3)})
@@ -2647,7 +2660,7 @@ def tts_worker(project: dict, script: dict, cfg: dict, job: dict) -> None:
         if engine == "edge":
             job["message"] = "在线配音失败，切离线语音…"
             out_wav = adir / "tts.wav"
-            durs = _sapi_tts(texts, out_wav, adir)
+            durs = _sapi_tts(texts, out_wav, adir, _rate_to_sapi(rate))
             timings, t = [], 0.0
             for i, d in enumerate(durs):
                 timings.append({"text": texts[i], "start": round(t, 3), "end": round(t + d, 3)})

@@ -2146,16 +2146,33 @@ function renderScriptTabs(sel, rerender){
   });
 }
 function renderTtsTabs(){ renderScriptTabs("#tts-tabs", renderTTS); }
+/* 配音失败/改过词的时候，给一个就在眼前的「重新配音」，别让人只看到一行报错 */
+function ttsRetryBtn(text){
+  const b = mk("button","b sm", text || "重新配音");
+  b.style.cssText = "margin-top:8px";
+  b.onclick = ()=> $("#btn-tts").click();
+  return b;
+}
 async function renderTTS(){
   const box = $("#tts-out"); box.innerHTML = "";
   const s = curScript();
   renderTtsTabs();
   if(!s){ box.appendChild(mk("div","empty","先去上一步生成脚本")); return; }
+  // 按钮文案跟着状态走：没配过是「生成配音」，已经配过/过期就是「重新配音」
+  $("#btn-tts").textContent = (s.tts && !s.tts_stale) ? "重新配音" : "生成配音";
   if(!s.tts){
-    box.appendChild(mk("div","empty","还没配音。点上面的「生成配音」配这一条，或「全部配音」一次配完所有脚本。"));
+    const e = mk("div","empty","还没配音。点下面的按钮配这一条，或上面的「全部配音」一次配完所有脚本。");
+    box.appendChild(e);
+    box.appendChild(ttsRetryBtn("生成配音"));
     return;
   }
   const t = s.tts;
+  if(s.tts_stale){
+    const w = mk("div","note bad");
+    w.textContent = "文案改过了，当前这条配音还是旧文案（时长也会不一样），点下面重新配。";
+    box.appendChild(w);
+    box.appendChild(ttsRetryBtn("重新配音"));
+  }
   const all = (S.project && S.project.scripts) || [];
   const note = mk("div","note" + (t.engine==="edge"?" ok":""), "");
   note.textContent = "第 " + (Math.min(S.idx, all.length-1)+1) + "/" + all.length + " 条 · " +
