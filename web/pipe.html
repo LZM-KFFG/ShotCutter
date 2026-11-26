@@ -536,6 +536,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
   <section id="v3" hidden>
     <div class="card">
       <h2>配音 <span class="hint">edge-tts 在线音色，带逐句时间戳；断网时回落系统语音</span></h2>
+      <div id="tts-tabs" class="row" style="gap:8px;flex-wrap:wrap;margin:2px 0 14px"></div>
       <div class="grid2">
         <div><label class="f">音色</label><select id="voice"></select></div>
         <div><label class="f">语速 <span id="rate-v">+8%</span></label>
@@ -562,6 +563,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
         <button class="g" id="btn-align">自动对齐</button>
         <button class="b" id="btn-batch" title="把选中的脚本一次走完配音、分镜、合成">批量出片</button>
       </div>
+      <div id="shot-tabs" class="row" style="gap:8px;flex-wrap:wrap;margin-top:12px"></div>
       <div class="kpi" style="margin-top:14px">
         <div><b id="k-clips">0</b>镜头数</div>
         <div><b id="k-mats">0</b>用到的素材</div>
@@ -576,6 +578,7 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
   <section id="v5" hidden>
     <div class="card">
       <h2>背景音乐 <span class="hint">口播是主音轨，BGM 自动压低；曲子比视频短会自动循环</span></h2>
+      <div class="hintline" style="margin:0 0 10px">成片音轨只有<b>配音 + BGM</b>：素材自带的声音（炒菜、撕袋、环境音）不会进成片，这是合成逻辑写死的，不是哪一项没勾选。</div>
       <div class="row">
         <input type="text" id="bgm-q" placeholder="搜曲名…" style="flex:1;min-width:160px">
         <button class="g sm" id="btn-bgm-add">加音乐文件夹</button>
@@ -620,6 +623,15 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
     </div>
     <div class="card">
       <h2>合成 <span class="hint">H.264 + 烧字幕；口播为主音轨，BGM 自动压低</span></h2>
+      <div class="row" style="margin-bottom:10px">
+        <div style="width:150px"><label class="f">片尾留白</label>
+          <select id="tail-hold" title="台词说完后画面多留一段，避免说完立刻切">
+            <option value="0">不留</option><option value="0.3">0.3 秒</option>
+            <option value="0.6" selected>0.6 秒</option><option value="0.9">0.9 秒</option>
+            <option value="1.5">1.5 秒</option>
+          </select></div>
+        <span class="hintline">说完后画面继续走、BGM 垫着，不会硬切</span>
+      </div>
       <div class="row">
         <button class="b" id="btn-compose">开始合成</button>
         <button class="g" id="btn-batch2" title="全部脚本一次出完">批量出片</button>
@@ -1098,8 +1110,24 @@ async function loadCfg(){
   sel.value = c.tts.voice;
   const rate = parseInt(String(c.tts.rate).replace(/[^-\d]/g,"")) || 0;
   $("#rate").value = rate; $("#rate-v").textContent = (rate>=0?"+":"") + rate + "%";
+  syncTailHold();
   renderLlmChip(c);
 }
+/* 片尾留白：写进 video.tail_hold，下次合成/批量出片就按这个来 */
+function syncTailHold(){
+  const v = (S.cfg && S.cfg.video) || {};
+  const cur = (v.tail_hold == null) ? 0.6 : +v.tail_hold;
+  const sel = $("#tail-hold"); if(!sel) return;
+  const hit = [...sel.options].find(o=> Math.abs(+o.value - cur) < 0.001);
+  sel.value = hit ? hit.value : "0.6";
+}
+$("#tail-hold").onchange = async e=>{
+  const val = +e.target.value || 0;
+  const r = await api("/api/pipe/config", {video:{ tail_hold: val }});
+  if(r.error){ toast(r.error, 3000); return; }
+  S.cfg = r.config;
+  toast(val ? ("片尾留白 " + val + " 秒") : "片尾不留白", 1600);
+};
 function shortModel(id){
   const s = String(id || "").split(/[\\/]/).pop();
   return s.replace(/\.gguf$/i, "").replace(/-Q\d(_[A-Z0-9_]+)?$/i, "").slice(0, 42) || "默认模型";
@@ -2086,17 +2114,49 @@ async function delScript(i){
 }
 
 /* ---------- ③ 配音 ---------- */
+/* 配音/分镜都是按脚本一条一条存的，这里把每条脚本都列出来，点一下切到哪条看哪条 */
+function renderScriptTabs(sel, rerender){
+  const box = $(sel); if(!box) return;
+  box.innerHTML = "";
+  const scripts = (S.project && S.project.scripts) || [];
+  if(!scripts.length) return;
+  scripts.forEach((s,i)=>{
+    const on = i === S.idx;
+    const nm = s.angle_label || ANGLE_LABEL[s.angle] || ("脚本 " + (i+1));
+    const t = s.tts || null;
+    const tags = [];
+    tags.push(t ? ("已配 " + (t.total||0).toFixed(1) + "s") : "未配音");
+    if(s.plan) tags.push("已分镜");
+    const b = mk("button", on ? "b sm" : "g sm", "");
+    b.style.cssText = "font-size:12px;padding:6px 12px;line-height:1.5";
+    b.textContent = (i+1) + ". " + nm + " · " + tags.join(" · ");
+    b.title = (t ? ("已配音 " + (t.sentences||[]).length + " 句 / " + (t.total||0).toFixed(1) + " 秒") : "这条还没配音")
+      + (s.plan ? "，已对齐 " + s.plan.clips.length + " 个镜头" : "，还没对齐分镜") + "；点这里切到这条";
+    b.onclick = async ()=>{
+      if(i === S.idx) return;
+      S.idx = i;
+      await api("/api/pipe/project", {action:"save", id:S.pid, active:i});
+      renderScripts();
+      rerender();
+    };
+    box.appendChild(b);
+  });
+}
+function renderTtsTabs(){ renderScriptTabs("#tts-tabs", renderTTS); }
 async function renderTTS(){
   const box = $("#tts-out"); box.innerHTML = "";
   const s = curScript();
+  renderTtsTabs();
   if(!s){ box.appendChild(mk("div","empty","先去上一步生成脚本")); return; }
   if(!s.tts){
     box.appendChild(mk("div","empty","还没配音。点上面的「生成配音」配这一条，或「全部配音」一次配完所有脚本。"));
     return;
   }
   const t = s.tts;
+  const all = (S.project && S.project.scripts) || [];
   const note = mk("div","note" + (t.engine==="edge"?" ok":""), "");
-  note.textContent = (t.engine==="edge" ? "edge-tts 在线配音" : "Windows 离线语音") +
+  note.textContent = "第 " + (Math.min(S.idx, all.length-1)+1) + "/" + all.length + " 条 · " +
+    (t.engine==="edge" ? "edge-tts 在线配音" : "Windows 离线语音") +
     " · " + t.sentences.length + " 句 · " + t.total.toFixed(1) + " 秒" + (t.note ? "　" + t.note : "");
   box.appendChild(note);
   const au = document.createElement("audio");
@@ -2177,6 +2237,7 @@ $("#btn-align").onclick = async ()=>{
 function renderShots(){
   const s = curScript(), wrap = $("#shots-wrap");
   wrap.innerHTML = "";
+  renderScriptTabs("#shot-tabs", renderShots);
   if(!s || !s.plan){
     $("#k-clips").textContent = 0; $("#k-mats").textContent = 0;
     $("#k-total").textContent = "0s"; $("#k-reuse").textContent = 0;
@@ -2311,9 +2372,17 @@ $("#bm-ready").onclick = ()=>{
   S.bmSel = new Set((S.project.scripts||[]).map((s,i)=>i).filter(i=>!((S.project.scripts[i].outs||[]).length)));
   renderBmList();
 };
+/* 关掉弹窗顺手把当前这一步刷一遍：批量出完片不该还要手动 F5 才看得见新文件 */
+async function closeBatch(){
+  $("#bm").classList.remove("on");
+  if(!S.bmDirty) return;
+  S.bmDirty = false;
+  if(S.step === 5) await renderOut();
+  else if(S.step === 4) renderShots();
+}
 $("#bm-var").onchange = bmCount;
-$("#bm-close").onclick = ()=> $("#bm").classList.remove("on");
-$("#bm").onclick = e=>{ if(e.target.id === "bm") $("#bm").classList.remove("on"); };
+$("#bm-close").onclick = closeBatch;
+$("#bm").onclick = e=>{ if(e.target.id === "bm") closeBatch(); };
 $("#btn-batch").onclick = openBatch;
 $("#btn-batch2").onclick = openBatch;
 
@@ -2354,15 +2423,28 @@ $("#bm-go").onclick = async ()=>{
   }
   $("#bm-msg").textContent = (j.message || "完成") + (b.failed ? "　" + b.failed + " 条失败" : "");
   renderBmResults(j.results || [], b);
+  S.bmDirty = (j.results || []).length > 0;
+  // 第 5 步默认落到这批最后出的那条，别还停在上次选的老片
+  const lastRes = (j.results || [])[(j.results || []).length - 1];
+  if(lastRes && lastRes.name){
+    S.lastOut = { name: lastRes.name };
+    localStorage.setItem("pipe_out", JSON.stringify({ name: lastRes.name }));
+  }
   await reloadProject();
   renderScripts();
   if(S.step === 4) renderShots();
+  if(S.step === 5) await renderOut();   // 第 5 步开着的话，弹窗后面这一页也直接刷出新成片
 };
 
 function renderBmResults(list, b){
   const box = $("#bm-out"); box.innerHTML = "";
   if(!list.length) return;
-  box.appendChild(mk("div","hintline","本次出片 " + list.length + " 条，点「播放」直接看，或去第 5 步"));
+  const hd = mk("div","hintline","本次出片 " + list.length + " 条，点「播放」直接看，或");
+  const bGo = mk("button","b sm","去第 5 步看成片");
+  bGo.style.cssText = "margin-left:8px;font-size:12px;padding:4px 10px";
+  bGo.onclick = ()=>{ $("#bm").classList.remove("on"); S.bmDirty = false; go(5); };
+  hd.appendChild(bGo);
+  box.appendChild(hd);
   list.forEach(x=>{
     const row = mk("div","bmres");
     row.appendChild(mk("span","nm", (x.angle||"") + (x.variant ? " V" + x.variant : "") + "　" + (x.name||"")));

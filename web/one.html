@@ -58,6 +58,13 @@ main{max-width:1360px;margin:0 auto;padding:20px}
   display:flex;flex-direction:column;transition:border-color .15s,box-shadow .15s}
 .plan-card:hover{border-color:var(--line-2);box-shadow:0 2px 12px rgba(26,23,18,.07)}
 .plan-card.hot{border-color:#D6A18B;background:#F6EAE2;box-shadow:inset 3px 0 0 var(--accent)}
+/* 渲染中：卡片描边高亮 + 呼吸感，点完立刻看得出在干活 */
+.plan-card.busy{border-color:var(--accent);animation:planPulse 1.4s ease-in-out infinite}
+.plan-card.busy .acts{border-top-color:rgba(193,59,27,.25)}
+.plan-card.dim{opacity:.5;filter:saturate(.6)}
+@keyframes planPulse{0%,100%{box-shadow:0 0 0 3px rgba(193,59,27,.10)}50%{box-shadow:0 0 0 7px rgba(193,59,27,.02)}}
+.plan-busy{margin:2px 0 12px;padding:9px 12px;border-radius:10px;border:1px solid #E8D5AE;
+  background:#FAEEDA;color:#8A5A10;font-size:12.5px;line-height:1.6}
 .plan-card .tag{padding:9px 14px;border-bottom:1px solid rgba(26,23,18,.09);
   font:10.5px var(--mono);letter-spacing:.16em;color:var(--dim);
   display:flex;justify-content:space-between;align-items:center}
@@ -417,6 +424,14 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
           <option value="0">全用原片</option>
           <option value="0.5" selected>一半一半</option>
           <option value="1">尽量空镜</option>
+        </select></div>
+      <div style="width:130px"><label class="f">片尾留白</label>
+        <select id="one-tail" title="台词说完后画面多留一会儿，避免说完就切">
+          <option value="0">不留</option>
+          <option value="0.3">0.3 秒</option>
+          <option value="0.6" selected>0.6 秒</option>
+          <option value="0.9">0.9 秒</option>
+          <option value="1.5">1.5 秒</option>
         </select></div>
     </div>
     <div class="row" style="margin-top:14px">
@@ -814,6 +829,7 @@ async function loadCfg(){
   $$("#presets button").forEach(b=>{
     b.classList.toggle("on", +b.dataset.w === +v.w && +b.dataset.h === +v.h);
   });
+  syncTailUi();
   renderLlmChip(c);
 }
 async function saveCfg(){
@@ -1775,13 +1791,20 @@ function renderPlans(){
   head.style.marginBottom = "10px";
   head.appendChild(mk("div", "hintline", PLAN.plans.length + " 个方案 · 点「渲染」才真正出片"));
   const all = mk("button", "b sm", "全部渲染");
+  all.id = "btn-render-all";
   all.onclick = ()=> renderIdxs(PLAN.plans.map(x=>x.idx));
   head.appendChild(all);
   box.appendChild(head);
+  // 渲染状态带：就在方案卡片上方，点了「渲染」立刻出现，不用往上翻到页面顶部看提示
+  const busy = mk("div", "plan-busy");
+  busy.id = "plan-busy";
+  busy.hidden = true;
+  box.appendChild(busy);
 
   const grid = mk("div", "plan-grid");
   PLAN.plans.forEach((p, i)=>{
     const card = mk("div", "plan-card" + (i === 0 ? " hot" : ""));
+    card.dataset.idx = p.idx;   // 渲染时靠它定位是哪张卡片
     const tag = mk("div", "tag");
     tag.appendChild(mk("span", null, "方案 " + String.fromCharCode(65 + i)));
     if(i === 0) tag.appendChild(mk("span", "badge", "推荐"));
@@ -1813,7 +1836,7 @@ function renderPlans(){
     pv.onclick = ()=> openSubPv(PLAN.pid, p.idx);
     const redo = mk("button", "g sm", "重挑");
     redo.onclick = ()=> genPlans(p.idx, (p.seed || 0) + 1);
-    const go1 = mk("button", "b sm", "渲染");
+    const go1 = mk("button", "b sm go-render", "渲染");
     go1.onclick = ()=> renderIdxs([p.idx]);
     acts.appendChild(pv); acts.appendChild(redo); acts.appendChild(go1);
     card.appendChild(acts);
@@ -1932,20 +1955,55 @@ function showResult(outs, failed){
   card.scrollIntoView({behavior:"smooth", block:"nearest"});
 }
 
+/* 渲染期间：卡片变"忙"、按钮禁掉、方案上方出一条状态带，别让人以为点了没反应 */
+let RENDERING = false;
+function setPlansBusy(on, idxs, msg){
+  const hitSet = idxs ? new Set(idxs.map(Number)) : null;
+  document.querySelectorAll("#one-plans .plan-card").forEach(c=>{
+    const hit = !hitSet || hitSet.has(Number(c.dataset.idx));
+    c.classList.toggle("busy", on && hit);
+    c.classList.toggle("dim", on && !hit);
+    c.querySelectorAll("button").forEach(b=>{ b.disabled = on; });
+    const go = c.querySelector("button.go-render");
+    if(go) go.textContent = (on && hit) ? "渲染中…" : "渲染";
+  });
+  const all = $("#btn-render-all");
+  if(all) all.disabled = on;
+  const bb = $("#plan-busy");
+  if(bb){
+    if(on){ bb.hidden = false; bb.textContent = msg || "已开始渲染，别关这个页面…"; }
+    else { bb.hidden = true; bb.textContent = ""; }
+  }
+}
 async function renderIdxs(idxs){
   if(!PLAN.pid || !idxs.length) return;
-  $("#btn-one").disabled = true;
+  if(RENDERING){ toast("正在渲染，等这批跑完", 2500); return; }
+  RENDERING = true;
+  // 先给反馈再发请求：请求本身可能要等一两秒，这段时间最容易让人觉得"没点上"
+  setPlansBusy(true, idxs, "已提交渲染（" + idxs.length + " 条），正在准备素材…");
+  bar($("#one-bar"), 0);
   $("#one-msg").textContent = "开始渲染 " + idxs.length + " 条…";
-  const r = await api("/api/pipe/render", {pid: PLAN.pid, idxs});
-  if(r.error){ toast(r.error, 4000); $("#btn-one").disabled = false; return; }
-  setOneJob(r.job);
-  const j = await pollJob(r.job, jj=>{
-    bar($("#one-bar"), jj.progress || 0);
-    $("#one-msg").textContent = jj.message || "";
-  });
-  $("#one-bar").style.display = "none";
-  $("#btn-one").disabled = false;
-  setOneJob("");
+  $("#btn-one").disabled = true;
+  let j = null;
+  try{
+    const r = await api("/api/pipe/render", {pid: PLAN.pid, idxs});
+    if(r.error){ toast(r.error, 4000); return; }
+    setOneJob(r.job);
+    j = await pollJob(r.job, jj=>{
+      bar($("#one-bar"), jj.progress || 0);
+      const txt = jj.message || "";
+      $("#one-msg").textContent = txt;
+      const bb = $("#plan-busy");
+      if(bb) bb.textContent = "渲染中 " + Math.round((jj.progress || 0) * 100) + "%　" + txt;
+    });
+  } finally {
+    RENDERING = false;
+    setPlansBusy(false);
+    $("#one-bar").style.display = "none";
+    $("#btn-one").disabled = false;
+    setOneJob("");
+  }
+  if(!j) return;
   $("#one-msg").textContent = j.state === "error" ? ("失败：" + j.error)
     : (j.state === "cancel" ? "已停止（已完成的成片保留）" : (j.message || "渲染完成"));
   if(j.state !== "error" && j.state !== "cancel"){
@@ -1959,6 +2017,22 @@ async function renderIdxs(idxs){
 
 $("#btn-one").onclick = ()=> genPlans(null, 0);
 $("#btn-res-dir").onclick = ()=> openFolder(RES.dir);
+
+/* 片尾留白：直接写进 video.tail_hold，改完下次渲染就生效，不用去翻配置文件 */
+function syncTailUi(){
+  const v = (S.cfg && S.cfg.video) || {};
+  const cur = (v.tail_hold == null) ? 0.6 : +v.tail_hold;
+  const sel = $("#one-tail");
+  const hit = [...sel.options].find(o=> Math.abs(+o.value - cur) < 0.001);
+  sel.value = hit ? hit.value : "0.6";
+}
+$("#one-tail").onchange = async e=>{
+  const val = +e.target.value || 0;
+  const r = await api("/api/pipe/config", {video:{ tail_hold: val }});
+  if(r.error){ toast(r.error, 3000); return; }
+  S.cfg = r.config;
+  toast(val ? ("片尾留白 " + val + " 秒") : "片尾不留白", 1600);
+};
 
 (async function boot(){
   $("#one-folders").value = localStorage.getItem("pipe_one_folders") || "";
