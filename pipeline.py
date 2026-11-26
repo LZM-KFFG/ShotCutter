@@ -86,6 +86,11 @@ DEFAULT_CFG = {
     "tts": {"engine": "edge", "voice": "zh-CN-XiaoxiaoNeural", "rate": "+8%", "gap": 0.08},
     "video": {
         "w": 1080, "h": 1920, "fps": 30, "crf": 21, "preset": "veryfast",
+        # max_slow：素材比镜头短时最多放慢几倍，用慢放补时长（默认 2）。
+        # 以前是硬编码 1.32，补不齐就复制末帧，画面会定住——就是「卡顿」的来源。
+        "max_slow": 2.0,
+        # tail_hold：片尾留白秒数。话说完立刻切太生硬，默认多留 0.6 秒画面。
+        "tail_hold": 0.6,
         "fit": "cover", "shot": 2.2, "min_shot": 1.0, "max_shot": 4.5,
         "subtitle": True, "sub_font": "Microsoft YaHei", "sub_size": 62,
         "sub_margin": 0.17, "sub_outline": 3.2, "hook": True, "sub_max_chars": 14,
@@ -185,6 +190,26 @@ def media_duration(path: str | Path) -> float:
     except Exception:
         pass
     return 0.0
+
+
+def media_video_duration(path: str | Path) -> float:
+    """视频轨的真实长度。
+
+    容器 Duration 取的是最长的那条流。素材里音频比画面长很常见（末尾一段
+    静止画面配着人声，或者画面流提前结束），这时按容器时长挑镜头，ss 会落到
+    没有画面的位置，渲染出来这一段几乎没有帧，整条片子就被拖短。
+    拿不到视频轨（纯音频/纯图片）就返回 0，调用方按容器时长处理。
+    """
+    try:
+        r = run(["-hide_banner", "-nostats", "-i", str(path), "-map", "0:v:0",
+                 "-c", "copy", "-f", "null", "-"], timeout=180)
+        txt = (r.stderr or "") + (r.stdout or "")
+        last = 0.0
+        for m in re.finditer(r"time=(\d+):(\d+):(\d+(?:\.\d+)?)", txt):
+            last = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+        return round(last, 3)
+    except Exception:
+        return 0.0
 
 
 def _kbps(size: int, dur: float) -> int:
@@ -2796,6 +2821,20 @@ def _candidates(items: list[dict], keys: list[str]) -> list[dict]:
     return hit + [it for it in items if it["id"] not in ids]
 
 
+def _pic_len(item: dict) -> float:
+    """这条素材真正能取到的画面长度。
+
+    池子里记的 dur 是容器时长（可能被更长的音轨撑大）。音频比画面长的素材，
+    按 dur 挑镜头会把 ss 甩到没有画面的位置，渲染出来这一段几乎没有帧，
+    整条成片就被拖短——观众看到的就是「文案没说完画面先没了」。
+    """
+    d = float(item.get("dur") or 0.0)
+    vd = float(item.get("vdur") or 0.0)
+    if vd > 0.2 and vd < d:
+        return vd
+    return d
+
+
 def _score(item: dict, keys: list[str], usage: dict, want: float, last: dict | None,
            used_sem: set | None = None) -> float:
     """给一个素材打分。
@@ -2819,7 +2858,7 @@ def _score(item: dict, keys: list[str], usage: dict, want: float, last: dict | N
     if used_sem:
         # 只有一个共同词（比如都是"木耳"）是正常的，重合两个以上说明画面很接近
         s -= min(2.4, 1.2 * max(0, len(used_sem & scene) - 1))
-    avail = item.get("dur") or 0.0
+    avail = _pic_len(item)
     if avail >= want:
         s += 0.9
     else:
@@ -3024,10 +3063,18 @@ def align(project: dict, script: dict, cfg: dict, seed: int | None = None,
             n += 1
         while n > 1 and dur / n < min_shot:
             n -= 1
-        seg = dur / n
         # 配音时间轴里有 hint 就用它；老项目没存，按文本回脚本句子里找
         keys = _keys(s.get("hint") or _hint_of(script, si, s.get("text", "")))
         picks = _candidates(items, keys)
+        # 素材普遍偏短时，别硬要一个 2.9 秒的镜头：手里最长只有 1.5 秒，
+        # 多出来的那截只能靠定格（画面卡住）或 2 倍慢放凑。多切一刀，
+        # 让每镜落在素材的真实长度附近，画面才是动的。
+        best_avail = max([float(it.get("dur") or 0.0) for it in picks] or [0.0])
+        if best_avail > 0.2:
+            while (dur / n > best_avail * 1.3 and n < 14
+                   and dur / (n + 1) >= max(min_shot, 0.9)):
+                n += 1
+        seg = dur / n
         first = True
         used_sem: set = set()
         for k in range(n):
@@ -3051,7 +3098,7 @@ def align(project: dict, script: dict, cfg: dict, seed: int | None = None,
             local[pick["id"]] = local.get(pick["id"], 0) + 1
             path_use[pick["path"]] = path_use.get(pick["path"], 0) + 1
             used_sem |= _scene_tags(pick)
-            avail = pick["dur"]
+            avail = _pic_len(pick)
             if avail >= seg:
                 room = avail - seg
                 ss = round(pick["start"] + (rnd.uniform(0, room) if room > 0.25 else room / 2), 3)
@@ -3490,12 +3537,52 @@ def compose_worker(project: dict, script: dict, cfg: dict, job: dict, variant: s
     ass_name = ass.name if ass else None
 
     total = round(sum(float(c["dur"]) for c in clips), 3)
+    # 成片长度以「口播」为准：镜头总长比音轨短的时候（素材画面比计划短、分镜没覆盖满），
+    # 以前是 -t 按镜头长度硬切，结果话说到一半画面就没了。这里把总长抬到音轨长度。
+    try:
+        adur = round(float(media_duration(audio)), 3) if audio else 0.0
+    except Exception:
+        adur = 0.0
+    if adur > total + 0.05:
+        total = adur
+    # 片尾留白：话说完就黑/就切，观感极其生硬。给最后一镜多留 tail_hold 秒，
+    # 画面继续走（素材后面还有就接着用，没有才定格），音频在结尾缓一下再收。
+    # 配在 video.tail_hold，0 = 不留（老行为）。
+    try:
+        tail = float(v["tail_hold"]) if "tail_hold" in v else 0.6
+    except (TypeError, ValueError):
+        tail = 0.6
+    tail = max(0.0, min(3.0, tail))
+    if tail > 0.02 and clips:
+        clips = [dict(c) for c in clips]      # 别改 plan 里的原始数据
+        last = clips[-1]
+        room = 0.0
+        try:
+            vd = media_video_duration(last["path"])
+            if vd > 0:
+                room = max(0.0, vd - (float(last.get("ss") or 0) + float(last.get("src") or 0)))
+        except Exception:
+            room = 0.0
+        last["dur"] = round(float(last["dur"]) + tail, 3)
+        last["want"] = last["dur"]
+        if room > 0.02:
+            # 素材后面还有画面：接着往下取，不留定格
+            last["src"] = round(float(last.get("src") or 0) + min(tail, room), 3)
+        total = round(total + tail, 3)
     job["total"] = len(clips)
     job["message"] = "准备合成 %d 个镜头 / %.1f 秒" % (len(clips), total)
 
     inputs: list[str] = []
     chains: list[str] = []
     fit = "increase" if (v.get("fit") or "cover") == "cover" else "decrease"
+    # 素材比镜头短的时候，靠放慢把时长补满，而不是复制末帧。复制末帧 = 画面定住，
+    # 观众看到的就是"每到镜头尾巴卡一下"。上限可配（video.max_slow），默认 2 倍：
+    # 再慢画面会抖成 12fps，反而更难受。
+    try:
+        max_slow = float(v.get("max_slow") or 2.0)
+    except (TypeError, ValueError):
+        max_slow = 2.0
+    max_slow = max(1.0, min(4.0, max_slow))
     for i, c in enumerate(clips):
         want = round(float(c["dur"]), 3)
         src = round(float(c.get("src") or want), 3)
@@ -3503,21 +3590,21 @@ def compose_worker(project: dict, script: dict, cfg: dict, job: dict, variant: s
         inputs += ["-ss", "%.3f" % ss, "-t", "%.3f" % max(0.1, src + 0.25), "-i", str(Path(c["path"]).resolve())]
         slow = 1.0
         if src > 0.05 and want > src * 1.02:
-            slow = min(1.32, want / src)
+            slow = min(max_slow, want / src)
         chain = ("[%d:v]setpts=PTS-STARTPTS,fps=%d,"
                  "scale=%d:%d:force_original_aspect_ratio=%s,"
                  "crop=%d:%d,setsar=1" % (i, FPS, W, H, fit, W, H))
-        # 一键出片自动抹掉源片烧进去的硬字幕（delogo，实时速度）。
-        # 配在 pipeline.json 的 director.delogo，格式 x:y:w:h，按**源片分辨率**给；
-        # 没配就是空串，下面这段等于不存在，不影响原来的五步流程。
-        _dl = str(((cfg.get("director") or {}).get("delogo") or "")).strip()
-        if _dl:
-            # 放在 scale+crop 之后：这样框的坐标永远按输出画布算，
-            # 素材分辨率不一时才不会报 "Logo area is outside of the frame"。
-            chain = chain.replace(",setsar=1", ",setsar=1,delogo=%s" % _dl, 1)
+        # 这里原来有个"自动抹掉硬字幕"的 delogo：读 pipeline.json 的 director.delogo，
+        # 非空就**无条件**给每个镜头糊一块，界面上没有任何开关，配过一次以后每条片
+        # 上部都带一道条纹状涂抹（delogo 是从边框往中间插值，看着像马赛克）。
+        # 已删除：要真去硬字幕请走第 1 步的「去字幕」（VSR 重绘），那才是干净的，
+        # 而且去完的素材会进池子，后面的流程自然用干净片。
         if slow > 1.02:
             chain += ",setpts=PTS*%.4f,fps=%d" % (slow, FPS)
-        chain += ",tpad=stop_mode=clone:stop_duration=%.3f" % max(0.0, want - src * slow + 0.2)
+        # 每个镜头都保证凑够 want 帧：素材画面比 want 长时 tpad 不会起作用（trim 先切齐），
+        # 只有画面不够时才会克隆末帧顶上。以前这里按"差多少补多少"算，结果素材视频轨
+        # 比记录短的时候补不够，整条片子被拖短。
+        chain += ",tpad=stop_mode=clone:stop_duration=%.3f" % (want + 1.0)
         chain += ",trim=duration=%.3f,setpts=PTS-STARTPTS,format=yuv420p[v%d]" % (want, i)
         chains.append(chain)
 
@@ -3542,7 +3629,18 @@ def compose_worker(project: dict, script: dict, cfg: dict, job: dict, variant: s
 
     cat = "".join("[v%d]" % i for i in range(len(clips)))
     filt = chains + [
-        "%sconcat=n=%d:v=1:a=0[vcat]" % (cat, len(clips)),
+        # a=0：镜头自带的音轨一律丢掉，只拼画面。成片的音轨 100% 来自下面
+        # 单独接进来的配音轨[ai]（+可选 BGM），素材原声（炒菜、撕袋、环境音）
+        # 不会出现。这是有意的设计，不是漏配——真要保留原声得把这里改成
+        # v=1:a=1，再给每镜 apad 补时长、压音量后三路 amix。
+        "%sconcat=n=%d:v=1:a=0[vcat0]" % (cat, len(clips)),
+        # 兜底补帧：万一某个镜头实际取到的画面比计划短（源片视频轨比容器时长短，
+        # 或 ss 落到了画面尾巴后面），整条片子会被这段拖短，音轨还在说、画面先没了。
+        # 这里克隆末帧把画面补到 total，下面 -t 再精确裁齐，宁可短暂定格也不能断片。
+        # 前面必须再过一遍 fps：concat 出来的帧带 duration 元数据，直接接 tpad 它会认为
+        # "流还没结束"而不补帧（实测 concat→tpad 无效，concat→fps→tpad 才有效）。
+        "[vcat0]fps=%d,tpad=stop=1:stop_mode=clone:stop_duration=%.3f[vcat]" % (
+            FPS, max(0.5, total + 0.5)),
     ]
     if ass_name:
         filt.append("[vcat]ass=%s[vout]" % ass_name)
@@ -3560,10 +3658,19 @@ def compose_worker(project: dict, script: dict, cfg: dict, job: dict, variant: s
         filt.append(chain + "[bg]")
         filt.append("[%d:a]volume=1.0[voice]" % ai)
         # normalize=0：不让 amix 把口播也砍半（默认 normalize=1 会按输入数均分音量）
-        filt.append("[voice][bg]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
-                    "alimiter=limit=0.95[aout]")
+        # duration=longest：口播先结束的话，BGM 还能把片尾留白垫住，
+        # 不然最后 0.6 秒会是一片死寂（平台也容易判「无内容」）。
+        mix = ("[voice][bg]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,"
+               "alimiter=limit=0.95")
+        if total > 1.2:
+            mix += ",afade=t=out:st=%.2f:d=%.2f" % (total - 0.35, 0.35)
+        filt.append(mix + "[aout]")
     else:
-        filt.append("[%d:a]alimiter=limit=0.95[aout]" % ai)
+        ch = "[%d:a]alimiter=limit=0.95" % ai
+        if total > 1.2:
+            # 没 BGM 也把尾巴收一下，别让最后一句被硬切
+            ch += ",afade=t=out:st=%.2f:d=%.2f" % (total - 0.35, 0.35)
+        filt.append(ch + "[aout]")
 
     # 文件名前缀优先用当前品名：换品名重新写稿后，新成片名跟着变，
     # 不再一直是建项目时那次填的名字

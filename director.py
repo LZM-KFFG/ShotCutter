@@ -154,9 +154,11 @@ def is_aroll(info: dict) -> bool:
 def probe(path: str) -> dict:
     """一条素材的体检结果：多长、有没有声音、说了多久。"""
     dur = pipe.media_duration(path)
+    # 视频轨长度单独记一份：容器时长会被更长的音轨撑大，按它挑镜头会挑到没画面的位置
+    vdur = pipe.media_video_duration(path)
     has = pipe.has_audio(path)
     sr = speech_ratio(path, dur) if has else 0.0
-    info = {"dur": round(dur, 3), "has_audio": bool(has),
+    info = {"dur": round(dur, 3), "vdur": round(vdur or 0.0, 3), "has_audio": bool(has),
             "speech": round(sr, 3), "at": time.time()}
     info["aroll"] = is_aroll(info)
     return info
@@ -1339,6 +1341,10 @@ def director_worker(job: dict, project: dict, product: dict, target: float = 45.
         else:
             ang = angles[(v + seed) % len(angles)]
             sc, note = write_script(product, cfg, job, target, ang, use_llm)
+            # 先把 idx 定下来再配音：tts_worker 是按 script["idx"] 决定写哪个
+            # audio_N 目录的。以前这里没设，三条方案全默认 idx=0，配音一个覆盖一个，
+            # 最后三条成片共用同一条音轨——文案和声音、时长全对不上。
+            sc["idx"] = len(project.get("scripts") or []) + len(made)
             tts_script(project, sc, cfg, job)
             sc["route"] = "script"
             sc["seed"] = v + seed
