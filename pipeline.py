@@ -96,6 +96,8 @@ DEFAULT_CFG = {
         "sub_margin": 0.17, "sub_outline": 3.2, "hook": True, "sub_max_chars": 14,
         "hook_text": "", "hook_dur": 3.2, "hook_size": 0,
         "bgm": "", "bgm_volume": 0.10,
+        # 口播音量：1.0 = 不改。小了就提上去，太大压下来（0.2~2.0 之间合理）
+        "voice_volume": 1.0,
         "bgm_dirs": [], "bgm_mode": "one", "bgm_fade": 0.8,
     },
     # 去硬字幕：调用本机 VSR（D:\Tools\VSR）自带 Python 跑命令行模式
@@ -2667,6 +2669,8 @@ def tts_worker(project: dict, script: dict, cfg: dict, job: dict) -> None:
     script["tts"] = {
         "audio": str(audio), "engine": mode, "voice": voice, "rate": rate,
         "sentences": timings, "total": round(total, 3), "note": note,
+        # 文案指纹：改完词能立刻判断配音是不是对不上，不用等看完成片才发现
+        "hash": _text_hash(texts),
     }
     project_save(project)
     job["result"] = {"total": round(total, 3), "sentences": len(timings), "engine": mode, "note": note,
@@ -2740,7 +2744,7 @@ def tts_all_worker(project: dict, cfg: dict, job: dict, force: bool = False) -> 
     for i, s in enumerate(scripts):
         job_gate(job)
         label = s.get("angle_label") or ("脚本 %d" % (i + 1))
-        if not force and _voice_ok(s):
+        if not force and not tts_stale(s):
             skipped += 1
             job["done"] = i + 1
             job["progress"] = (i + 1) / total
@@ -3513,6 +3517,29 @@ def _voice_ok(script: dict) -> bool:
         return False
 
 
+def _text_hash(texts) -> str:
+    joined = "\n".join(str(t or "").strip() for t in texts)
+    return hashlib.md5(joined.encode("utf-8")).hexdigest()[:12]
+
+
+def tts_stale(script: dict) -> bool:
+    """配音还能用吗？
+
+    音频没生成、文件被删、或者文案改过（句子文字和配音时的指纹不一致）都算过期。
+    老项目没存指纹的按「文件在就算好」处理，不强行重配。
+    改完词直接出片会拿到一段和文字对不上的旧声音，凭这个判断提前重配。
+    """
+    t = script.get("tts") or {}
+    if not _voice_ok(script):
+        return True
+    h = t.get("hash")
+    if not h:
+        return False
+    texts = [s.get("text") for s in (script.get("sentences") or [])
+             if str(s.get("text") or "").strip()]
+    return _text_hash(texts) != h
+
+
 def compose_worker(project: dict, script: dict, cfg: dict, job: dict, variant: str = "",
                    bgm_override: str | None = None) -> None:
     v = cfg["video"]
@@ -3522,10 +3549,10 @@ def compose_worker(project: dict, script: dict, cfg: dict, job: dict, variant: s
     audio = plan.get("audio") or (script.get("tts") or {}).get("audio")
     if not clips:
         raise RuntimeError("还没有分镜，先做对齐")
-    if not _voice_ok(script):
-        # 配音文件被删了（例如「删除成片」连带清理了 audio_N）——这里自动补一次，
+    if tts_stale(script):
+        # 配音文件被删了、或者文案改过（指纹对不上）——这里自动补一次，
         # 不要让人看到 ffmpeg 的 "No such file or directory"
-        job["message"] = "配音文件不见了，重新配音…"
+        job["message"] = "文案改过或配音丢失，重新配音…"
         tts_worker(project, script, cfg, {"message": "", "progress": 0.0, "total": 1})
         audio = (script.get("tts") or {}).get("audio")
         plan["audio"] = audio
@@ -3648,6 +3675,9 @@ def compose_worker(project: dict, script: dict, cfg: dict, job: dict, variant: s
     else:
         vmap = "[vcat]"
 
+    # 口播音量两个分支都要用，提到外面算一次
+    vv = float(v.get("voice_volume") if v.get("voice_volume") is not None else 1.0)
+    vv = max(0.0, min(3.0, vv))
     if bgm:
         vol = float(v.get("bgm_volume") or 0.1)
         fade = max(0.0, min(5.0, float(v.get("bgm_fade") or 0)))
@@ -3656,7 +3686,7 @@ def compose_worker(project: dict, script: dict, cfg: dict, job: dict, variant: s
             chain += ",afade=t=in:st=0:d=%.2f" % fade
             chain += ",afade=t=out:st=%.2f:d=%.2f" % (total - fade, fade)
         filt.append(chain + "[bg]")
-        filt.append("[%d:a]volume=1.0[voice]" % ai)
+        filt.append("[%d:a]volume=%.3f[voice]" % (ai, vv))
         # normalize=0：不让 amix 把口播也砍半（默认 normalize=1 会按输入数均分音量）
         # duration=longest：口播先结束的话，BGM 还能把片尾留白垫住，
         # 不然最后 0.6 秒会是一片死寂（平台也容易判「无内容」）。
@@ -3666,7 +3696,7 @@ def compose_worker(project: dict, script: dict, cfg: dict, job: dict, variant: s
             mix += ",afade=t=out:st=%.2f:d=%.2f" % (total - 0.35, 0.35)
         filt.append(mix + "[aout]")
     else:
-        ch = "[%d:a]alimiter=limit=0.95" % ai
+        ch = "[%d:a]volume=%.3f,alimiter=limit=0.95" % (ai, vv)
         if total > 1.2:
             # 没 BGM 也把尾巴收一下，别让最后一句被硬切
             ch += ",afade=t=out:st=%.2f:d=%.2f" % (total - 0.35, 0.35)
@@ -3813,7 +3843,7 @@ def batch_worker(project: dict, idxs: list, cfg: dict, job: dict,
 
         # 配音：每条脚本只做一次（第一个版本之前）
         try:
-            if redo_tts or not _voice_ok(s):
+            if redo_tts or tts_stale(s):
                 head(0.01, "配音中…")
                 tts_worker(project, s, cfg,
                            _SubJob(lambda f: head(0.01 + 0.14 * f, "配音中…")))

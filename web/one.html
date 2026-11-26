@@ -496,7 +496,9 @@ h1,h2,h3{font-family:var(--display);letter-spacing:.01em}
       <audio id="mix-audio" controls preload="none" style="flex:1;min-width:220px;height:34px"></audio>
     </div>
     <div class="hintline" id="mix-msg" style="margin-top:4px"></div>
-    <div class="grid2" style="margin-top:10px">
+    <div class="grid3" style="margin-top:10px">
+      <div><label class="f">配音音量 <b id="voice-vol-v">1.00</b></label>
+        <input type="range" id="voice-vol" min="0.2" max="2" step="0.02" value="1" style="width:100%"></div>
       <div><label class="f">BGM 音量 <b id="bgm-vol-v">0.10</b></label>
         <input type="range" id="bgm-vol" min="0" max="0.6" step="0.01" style="width:100%"></div>
       <div><label class="f">淡入淡出</label>
@@ -993,6 +995,7 @@ async function saveBgmLive(){
     bgm: mode === "one" ? val : "",
     bgm_mode: mode,
     bgm_volume: +$("#bgm-vol").value,
+    voice_volume: +$("#voice-vol").value,
     bgm_fade: +$("#bgm-fade").value
   };
   const r = await api("/api/pipe/config", {video});
@@ -1082,6 +1085,10 @@ async function loadBgm(){
   const vol = (v.bgm_volume != null) ? +v.bgm_volume : 0.1;
   $("#bgm-vol").value = vol;
   $("#bgm-vol-v").textContent = vol.toFixed(2);
+  const vvol = (v.voice_volume != null) ? +v.voice_volume : 1.0;
+  $("#voice-vol").value = vvol;
+  $("#voice-vol-v").textContent = vvol.toFixed(2);
+  syncPreviewVolume();
   const fade = String((v.bgm_fade != null) ? +v.bgm_fade : 0.8);
   $("#bgm-fade").value = [...$("#bgm-fade").options].some(o=>o.value === fade) ? fade : "0.8";
 
@@ -1119,12 +1126,21 @@ async function loadBgm(){
   updateBgmAudio();
 }
 $("#bgm-q").addEventListener("input", ()=> renderBgmLib());
-$("#bgm-vol").oninput = ()=>{ $("#bgm-vol-v").textContent = (+$("#bgm-vol").value).toFixed(2); };
+$("#bgm-vol").oninput = ()=>{ $("#bgm-vol-v").textContent = (+$("#bgm-vol").value).toFixed(2); syncPreviewVolume(); };
 $("#bgm-vol").onchange = ()=> saveBgmLive();
+/* 试听原曲按 BGM 音量衰减播放：浏览器默认 100% 音量，而成片里 BGM 只有 0.1~0.3，
+   直接对比会觉得"试听比成片响一大截" */
+function syncPreviewVolume(){
+  const a = $("#bgm-audio");
+  if(a) a.volume = Math.max(0, Math.min(1, +$("#bgm-vol").value || 0));
+}
+$("#voice-vol").oninput = ()=>{ $("#voice-vol-v").textContent = (+$("#voice-vol").value).toFixed(2); };
+$("#voice-vol").onchange = ()=> saveBgmLive();
 $("#bgm-fade").onchange = ()=> saveBgmLive();
 $("#btn-bgm-refresh").onclick = ()=> loadBgm();
 $("#btn-bgm-play").onclick = ()=>{
   const a = $("#bgm-audio");
+  syncPreviewVolume();
   if(!a.getAttribute("src")){ toast("先在曲库里选/试听一首"); return; }
   if(a.paused) a.play().catch(()=>toast("浏览器不允许播放，点播放器上的按钮试试")); else a.pause();
 };
@@ -1139,6 +1155,7 @@ async function mixPreview(bgm, note, onlineFn){
   btn.textContent = "混音中…";
   try{
     const params = {vol: $("#bgm-vol").value, fade: $("#bgm-fade").value,
+                    vv: $("#voice-vol").value,
                     pid, idx, dur: "20", t: Date.now()};
     if(onlineFn) params.fn = onlineFn; else params.bgm = bgm;
     const res = await fetch("/api/pipe/bgm/preview?" + new URLSearchParams(params));
@@ -1173,7 +1190,7 @@ $("#btn-mix-play").onclick = ()=>{
   mixPreview(bgm, "");
 };
 /* 参数动了之后提醒重新听一次（缓存的旧混音不代表新音量） */
-["#bgm-vol", "#bgm-fade"].forEach(id=>{
+["#bgm-vol", "#voice-vol", "#bgm-fade"].forEach(id=>{
   $(id).addEventListener("input", ()=>{
     if($("#mix-audio").getAttribute("src")) $("#mix-msg").textContent = "参数变了，重新点「试听混音」听新的效果";
   });
@@ -1829,20 +1846,70 @@ function renderPlans(){
       card.appendChild(mk("div", "warn",
         p.numbers.slice(0, 3).join("、") + " 商品信息里没有，播前核对"));
     }
+    if(p.edited) card.appendChild(mk("div", "warn", "文案改过，渲染时会重新配音，时长会变"));
 
     const acts = mk("div", "acts");
     const pv = mk("button", "g sm", "字幕");
     pv.title = "预览这条方案的字幕，顺便调黄色标题字幕";
     pv.onclick = ()=> openSubPv(PLAN.pid, p.idx);
+    const edit = mk("button", "g sm", "改词");
+    edit.title = "直接改文案；保存后渲染时会按新文案自动重配配音";
+    edit.onclick = ()=> openPlanEditor(p, card, lines, acts);
     const redo = mk("button", "g sm", "重挑");
     redo.onclick = ()=> genPlans(p.idx, (p.seed || 0) + 1);
     const go1 = mk("button", "b sm go-render", "渲染");
     go1.onclick = ()=> renderIdxs([p.idx]);
-    acts.appendChild(pv); acts.appendChild(redo); acts.appendChild(go1);
+    acts.appendChild(pv); acts.appendChild(edit); acts.appendChild(redo); acts.appendChild(go1);
     card.appendChild(acts);
     grid.appendChild(card);
   });
   box.appendChild(grid);
+}
+
+/* 改词：直接在卡片里编辑句子，存回项目；渲染时 compose 会发现配音指纹对不上，
+   自动重配，再按新时间轴对齐分镜，不用手动重出方案 */
+async function openPlanEditor(p, card, linesEl, acts){
+  const r = await api("/api/pipe/project?id=" + encodeURIComponent(PLAN.pid));
+  if(r.error || !r.project){ toast(r.error || "拿不到脚本", 3000); return; }
+  const sc = (r.project.scripts || [])[p.idx];
+  if(!sc){ toast("这条脚本已经不在了，重出方案吧", 3000); return; }
+  const sents = (sc.sentences || []).map(s=>({text: String(s.text || ""), hint: String(s.hint || "")}));
+  if(!sents.length){ toast("这条脚本没有句子", 2500); return; }
+
+  const box = mk("div", "lines");
+  const tas = [];
+  sents.forEach(s=>{
+    const ta = document.createElement("textarea");
+    ta.value = s.text; ta.rows = 2;
+    ta.style.cssText = "width:100%;box-sizing:border-box;font-size:12px;line-height:1.6;" +
+      "padding:6px;margin-bottom:6px;border:1px solid var(--line);border-radius:6px;" +
+      "resize:vertical;background:#FFFDF6";
+    ta.oninput = ()=>{ ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; };
+    box.appendChild(ta); tas.push(ta);
+  });
+  const bar = mk("div", "row"); bar.style.marginTop = "6px"; bar.style.gap = "8px";
+  const ok = mk("button", "b sm", "保存并重配");
+  const no = mk("button", "g sm", "取消");
+  bar.appendChild(ok); bar.appendChild(no);
+
+  card.replaceChild(box, linesEl);
+  card.insertBefore(bar, acts);
+  acts.style.display = "none";
+
+  no.onclick = ()=> renderPlans();
+  ok.onclick = async ()=>{
+    const payload = tas.map((ta, i)=>({text: ta.value.trim(), hint: sents[i].hint}));
+    if(payload.some(x=> !x.text)){ toast("有句子是空的，先补上", 2500); return; }
+    ok.disabled = true; ok.textContent = "保存中…";
+    const rr = await api("/api/pipe/project",
+      {action: "save", id: PLAN.pid, idx: p.idx, script: {sentences: payload}});
+    if(rr.error){ toast(rr.error, 3500); ok.disabled = false; ok.textContent = "保存并重配"; return; }
+    p.lines = payload.map(x=> x.text);
+    p.count = payload.length;
+    p.edited = true;
+    toast("已保存；渲染这条时按新文案重新配音、重新对齐", 3200);
+    renderPlans();
+  };
 }
 
 /* ---------- 字幕预览：渲染前检查，黄字幕可调 ---------- */

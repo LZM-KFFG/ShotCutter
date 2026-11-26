@@ -1010,7 +1010,8 @@ def _preview_voice(pid: str, idx: int) -> tuple[str, str]:
     return "", ""
 
 
-def _bgm_preview(bgm, voice: str, vol: float, fade: float, dur: float) -> Path:
+def _bgm_preview(bgm, voice: str, vol: float, fade: float, dur: float,
+                 voice_vol: float = 1.0) -> Path:
     """按合成时的同一条滤镜链混一小段音频，返回 mp3 缓存文件。
 
     bgm 可以是本地文件路径，也可以是在线曲库的 https 直链（ffmpeg 直接拉流）。
@@ -1021,7 +1022,7 @@ def _bgm_preview(bgm, voice: str, vol: float, fade: float, dur: float) -> Path:
         vmtime = int(Path(voice).stat().st_mtime)
     except OSError:
         vmtime = 0
-    key = "%s|%s|%.3f|%.2f|%.2f|%d" % (bgm, voice, vol, fade, total, vmtime)
+    key = "%s|%s|%.3f|%.2f|%.2f|%.3f|%d" % (bgm, voice, vol, fade, total, voice_vol, vmtime)
     h = hashlib.md5(key.encode("utf-8", "replace")).hexdigest()[:16]
     cache = pipe.WORK / "bgm_prev"
     cache.mkdir(parents=True, exist_ok=True)
@@ -1035,7 +1036,7 @@ def _bgm_preview(bgm, voice: str, vol: float, fade: float, dur: float) -> Path:
         chain += ",afade=t=in:st=0:d=%.2f" % fade
         chain += ",afade=t=out:st=%.2f:d=%.2f" % (total - fade, fade)
     filt = [chain + "[bg]",
-            "[0:a]volume=1.0[voice]",
+            "[0:a]volume=%.3f[voice]" % voice_vol,
             "[voice][bg]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
             "alimiter=limit=0.95[aout]"]
     args = ["-v", "error", "-y", "-i", voice, "-stream_loop", "-1", "-i", str(bgm),
@@ -2186,6 +2187,12 @@ def render_scripts(job: dict, p: dict, idxs: list, cfg: dict) -> tuple[list, lis
         s = scripts[si]
         acfg = dirw.align_cfg(cfg, s)
         try:
+            # 文案改过（句子和配音时的指纹对不上）就先重配，否则对齐拿的还是旧时间轴，
+            # 出来的片子和文字对不上
+            if pipe.tts_stale(s):
+                job["message"] = "[%d/%d] 文案改过，重新配音…" % (k + 1, n)
+                dirw.tts_script(p, s, cfg, job)
+                pipe.project_save(p)
             job["message"] = "[%d/%d] 分镜…" % (k + 1, n)
             pipe.align(p, s, acfg, seed=None if k == 0 else k * 13 + 7,
                        used=shared_use)
@@ -2518,6 +2525,13 @@ class Handler(BaseHTTPRequestHandler):
             if not p:
                 self._json({"error": "项目不存在"}, 404)
             else:
+                # 顺手标一下哪几条的配音已经和文案对不上了（改过词/音频被删），
+                # 前端好提示「需重配」，不用等出片才发现
+                for _s in (p.get("scripts") or []):
+                    try:
+                        _s["tts_stale"] = pipe.tts_stale(_s)
+                    except Exception:  # noqa: BLE001
+                        _s["tts_stale"] = False
                 self._json({"ok": True, "project": p})
         elif u.path == "/api/pipe/thumb":
             cid = (q.get("id") or [""])[0]
@@ -2595,6 +2609,11 @@ class Handler(BaseHTTPRequestHandler):
                 dur = max(5.0, min(60.0, float((q.get("dur") or ["20"])[0])))
             except ValueError:
                 dur = 20.0
+            try:
+                # 口播音量：跟第 5 步那个滑杆走，这样试听混音和成片是一个响度
+                vv = max(0.0, min(3.0, float((q.get("vv") or ["1"])[0])))
+            except ValueError:
+                vv = 1.0
             if bgm.startswith("http://") or bgm.startswith("https://"):
                 ok = True               # 在线直链：ffmpeg 拉流，不做本地校验
                 f = None
@@ -2616,7 +2635,7 @@ class Handler(BaseHTTPRequestHandler):
                            404)
                 return
             try:
-                out = _bgm_preview(bgm, voice, vol, fade, dur)
+                out = _bgm_preview(bgm, voice, vol, fade, dur, vv)
             except Exception as exc:  # noqa: BLE001
                 self._json({"ok": False, "error": "混音失败：%s" % exc}, 500)
                 return
